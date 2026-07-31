@@ -1,0 +1,41 @@
+---
+import Base from '../layouts/Base.astro';
+import { routes } from '../i18n/ui';
+---
+
+<Base
+  lang="en"
+  page="home"
+  title="Page not found"
+  description="The page you were looking for could not be found."
+>
+  <section class="section notfound">
+    <div class="container container-narrow">
+      <p class="eyebrow">404</p>
+      <h1>This page could not be found.</h1>
+      <p class="lead">The page may have moved, or the link may be incomplete.</p>
+      <p class="notfound__ar" dir="rtl" lang="ar">تعذّر العثور على هذه الصفحة.</p>
+      <div class="notfound__actions">
+        <a class="btn btn--primary" href={routes.home.en}>Home</a>
+        <a class="btn btn--ghost" href={routes.home.ar} lang="ar">الصفحة الرئيسية</a>
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .notfound {
+    padding-block: clamp(3.5rem, 2.5rem + 5vw, 6rem);
+  }
+  .notfound__ar {
+    color: var(--ink-soft);
+    font-family: var(--font-arabic);
+    margin-top: -0.4rem;
+  }
+  .notfound__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.85rem;
+    margin-top: 2rem;
+  }
+</style>

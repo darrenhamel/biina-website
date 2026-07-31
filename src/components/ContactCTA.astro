@@ -1,0 +1,75 @@
+---
+import { t, routes, type Lang } from '../i18n/ui';
+interface Props {
+  lang: Lang;
+  heading: string;
+  text: string;
+  cta: string;
+}
+const { lang, heading, text, cta } = Astro.props;
+const s = t(lang);
+---
+
+<section class="cta">
+  <div class="container cta__inner">
+    <div>
+      <h2 class="cta__heading">{heading}</h2>
+      <p class="cta__text">{text}</p>
+    </div>
+    <div class="cta__actions">
+      <a class="btn btn--primary arrow" href={routes.contact[lang]}>{cta}</a>
+      <a class="cta__mail" href={`mailto:${s.email}`}>{s.email}</a>
+    </div>
+  </div>
+</section>
+
+<style>
+  .cta {
+    background: var(--navy-900);
+    color: var(--on-dark);
+  }
+  .cta__inner {
+    display: grid;
+    gap: 1.75rem;
+    padding-block: clamp(2.75rem, 2rem + 3vw, 4rem);
+    align-items: center;
+  }
+  @media (min-width: 46rem) {
+    .cta__inner {
+      grid-template-columns: 1.5fr 1fr;
+      gap: 3rem;
+    }
+    .cta__actions {
+      justify-self: end;
+      text-align: end;
+    }
+  }
+  .cta__heading {
+    color: #fff;
+    margin-bottom: 0.4em;
+  }
+  .cta__text {
+    color: var(--on-dark-soft);
+    margin: 0;
+    max-width: 46ch;
+  }
+  .cta__actions {
+    display: flex;
+    flex-direction: column;
+    align-items: start;
+    gap: 0.9rem;
+  }
+  @media (min-width: 46rem) {
+    .cta__actions {
+      align-items: end;
+    }
+  }
+  .cta__mail {
+    color: var(--on-dark-soft);
+    text-decoration: none;
+    font-size: 0.95rem;
+  }
+  .cta__mail:hover {
+    color: #fff;
+  }
+</style>

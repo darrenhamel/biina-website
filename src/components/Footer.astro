@@ -1,0 +1,174 @@
+---
+import Logo from './Logo.astro';
+import { t, routes, navOrder, type Lang, type PageKey } from '../i18n/ui';
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const s = t(lang);
+const year = 2026;
+---
+
+<footer class="site-footer">
+  <div class="container site-footer__inner">
+    <div class="site-footer__brand">
+      <a class="brand brand--footer" href={routes.home[lang]} aria-label="BIINA">
+        <Logo class="brand__mark" />
+        <span class="brand__word">BIINA</span>
+      </a>
+      <p class="site-footer__desc">{s.footer.description}</p>
+    </div>
+
+    <nav class="site-footer__col" aria-label={s.footer.navHeading}>
+      <h2 class="site-footer__heading">{s.footer.navHeading}</h2>
+      <ul>
+        {
+          navOrder.map((key: PageKey) => (
+            <li>
+              <a href={routes[key][lang]}>{s.nav[key]}</a>
+            </li>
+          ))
+        }
+      </ul>
+    </nav>
+
+    <div class="site-footer__col">
+      <h2 class="site-footer__heading">{s.footer.contactHeading}</h2>
+      <ul>
+        <li><a href={`mailto:${s.email}`}>{s.email}</a></li>
+        <li>{lang === 'ar' ? 'أبوظبي، الإمارات العربية المتحدة' : 'Abu Dhabi, United Arab Emirates'}</li>
+      </ul>
+      <h2 class="site-footer__heading site-footer__heading--status">
+        {s.footer.statusHeading}
+      </h2>
+      <p class="site-footer__status">
+        <span class="site-footer__dot" aria-hidden="true"></span>
+        {s.footer.status}
+      </p>
+    </div>
+  </div>
+
+  <div class="container site-footer__base">
+    <p class="site-footer__disclaimer">{s.footer.disclaimer}</p>
+    <p class="site-footer__legal">© {year} BIINA. {s.footer.rights}</p>
+  </div>
+</footer>
+
+<style>
+  .site-footer {
+    background: var(--navy-900);
+    color: var(--on-dark-soft);
+    margin-top: auto;
+  }
+
+  .site-footer__inner {
+    display: grid;
+    gap: 2.5rem;
+    padding-block: 3.5rem 2.5rem;
+  }
+
+  @media (min-width: 46rem) {
+    .site-footer__inner {
+      grid-template-columns: 1.6fr 1fr 1.3fr;
+      gap: 3rem;
+    }
+  }
+
+  .brand--footer {
+    color: var(--on-dark);
+    margin-bottom: 1rem;
+  }
+
+  .brand--footer .brand__word {
+    color: var(--on-dark);
+    font-size: 1.2rem;
+  }
+
+  .site-footer__desc {
+    max-width: 40ch;
+    font-size: 0.96rem;
+    line-height: 1.7;
+    margin: 0;
+  }
+
+  .site-footer__heading {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--on-dark);
+    margin: 0 0 1rem;
+  }
+
+  :global(:root[dir='rtl']) .site-footer__heading {
+    letter-spacing: 0.02em;
+  }
+
+  .site-footer__heading--status {
+    margin-top: 1.75rem;
+  }
+
+  .site-footer__col ul {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.65rem;
+    font-size: 0.96rem;
+  }
+
+  .site-footer__col a {
+    color: var(--on-dark-soft);
+    text-decoration: none;
+  }
+
+  .site-footer__col a:hover {
+    color: #fff;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+  }
+
+  .site-footer__status {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    margin: 0;
+    font-size: 0.92rem;
+    color: var(--on-dark-soft);
+  }
+
+  .site-footer__dot {
+    width: 0.55rem;
+    height: 0.55rem;
+    border-radius: 50%;
+    background: #46d39a;
+    box-shadow: 0 0 0 3px rgba(70, 211, 154, 0.2);
+    flex: none;
+  }
+
+  .site-footer__base {
+    border-top: 1px solid var(--on-dark-line);
+    padding-block: 1.5rem 2rem;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem 2rem;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+
+  .site-footer__disclaimer {
+    margin: 0;
+    font-size: 0.83rem;
+    color: var(--on-dark-soft);
+    max-width: 62ch;
+    opacity: 0.85;
+  }
+
+  .site-footer__legal {
+    margin: 0;
+    font-size: 0.83rem;
+    color: var(--on-dark-soft);
+    white-space: nowrap;
+  }
+</style>

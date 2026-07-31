@@ -1,0 +1,215 @@
+---
+import Base from '../layouts/Base.astro';
+import PageHeader from '../components/PageHeader.astro';
+import DevNote from '../components/DevNote.astro';
+import { t, type Lang } from '../i18n/ui';
+import { contact } from '../data/contact';
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const c = contact[lang];
+const s = t(lang);
+
+// -------------------------------------------------------------------------
+// Formspree endpoint.
+// 1. Create a free form at https://formspree.io (use the contact email below).
+// 2. Replace the id in FORMSPREE_ID with the one Formspree gives you
+//    (looks like "xay z abcd" -> "xayzabcd", the part after /f/).
+// Until then the form posts to a placeholder that will not deliver mail.
+// -------------------------------------------------------------------------
+const FORMSPREE_ID = 'your-form-id';
+const formAction = `https://formspree.io/f/${FORMSPREE_ID}`;
+const isPlaceholder = FORMSPREE_ID === 'your-form-id';
+---
+
+<Base lang={lang} page="contact" title={c.title} description={c.description}>
+  <PageHeader eyebrow={c.eyebrow} title={c.heading} lead={c.lead} />
+
+  <section class="section">
+    <div class="container contact-grid">
+      <!-- Form -->
+      <div class="contact-form-wrap">
+        <h2 class="visually-hidden">{c.formHeading}</h2>
+
+        {
+          isPlaceholder && (
+            <p class="form-placeholder">
+              {lang === 'ar'
+                ? '⚙︎ نموذج تجريبي: استبدِل معرّف Formspree في الشيفرة قبل النشر لتصل الرسائل.'
+                : '⚙︎ Placeholder form: replace the Formspree ID in the code before launch so messages are delivered.'}
+            </p>
+          )
+        }
+
+        <form class="contact-form" action={formAction} method="POST">
+          <!-- Spam honeypot (hidden from people) -->
+          <input type="text" name="_gotcha" tabindex="-1" autocomplete="off" class="honeypot" aria-hidden="true" />
+          <input type="hidden" name="_subject" value={`BIINA enquiry (${lang.toUpperCase()})`} />
+          <input type="hidden" name="language" value={lang} />
+
+          <div class="field">
+            <label for="name">{c.nameLabel}</label>
+            <input id="name" name="name" type="text" required autocomplete="name" />
+          </div>
+
+          <div class="field">
+            <label for="email">{c.emailLabel}</label>
+            <input id="email" name="email" type="email" required autocomplete="email" />
+          </div>
+
+          <div class="field">
+            <label for="organisation">
+              {c.orgLabel} <span class="optional">({c.orgOptional})</span>
+            </label>
+            <input id="organisation" name="organisation" type="text" autocomplete="organization" />
+          </div>
+
+          <div class="field">
+            <label for="subject">{c.subjectLabel}</label>
+            <select id="subject" name="subject">
+              {c.subjectOptions.map((opt) => <option value={opt}>{opt}</option>)}
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="message">{c.messageLabel}</label>
+            <textarea id="message" name="message" rows="6" required></textarea>
+          </div>
+
+          <button type="submit" class="btn btn--primary">{c.submit}</button>
+
+          <p class="privacy">{c.privacy}</p>
+        </form>
+      </div>
+
+      <!-- Aside: email + note -->
+      <aside class="contact-aside">
+        <div class="aside-card">
+          <h2>{c.altHeading}</h2>
+          <p>{c.altBody}</p>
+          <a class="email-link" href={`mailto:${s.email}`}>{s.email}</a>
+        </div>
+        <DevNote label={c.devLabel} text={c.devText} />
+      </aside>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .contact-grid {
+    display: grid;
+    gap: 2.5rem;
+  }
+  @media (min-width: 52rem) {
+    .contact-grid {
+      grid-template-columns: 1.4fr 1fr;
+      gap: 3.5rem;
+      align-items: start;
+    }
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .form-placeholder {
+    background: #fff6e6;
+    border: 1px solid #f2d79a;
+    color: #6b4e12;
+    border-radius: var(--radius-sm);
+    padding: 0.75rem 1rem;
+    font-size: 0.9rem;
+    margin-bottom: 1.5rem;
+  }
+
+  /* Hidden from people, present for bots — must NOT create page overflow. */
+  .honeypot {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+    border: 0;
+  }
+
+  .field {
+    margin-bottom: 1.25rem;
+  }
+  .field label {
+    display: block;
+    font-weight: 600;
+    font-size: 0.95rem;
+    color: var(--navy-800);
+    margin-bottom: 0.45rem;
+  }
+  .optional {
+    font-weight: 400;
+    color: var(--ink-soft);
+  }
+  .field input,
+  .field select,
+  .field textarea {
+    width: 100%;
+    font-family: inherit;
+    font-size: 1rem;
+    color: var(--ink);
+    background: var(--paper);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-sm);
+    padding: 0.7rem 0.85rem;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  .field textarea {
+    resize: vertical;
+    min-height: 8rem;
+  }
+  .field input:focus,
+  .field select:focus,
+  .field textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(47, 107, 237, 0.15);
+  }
+
+  .contact-form button[type='submit'] {
+    margin-top: 0.25rem;
+  }
+
+  .privacy {
+    margin: 1.25rem 0 0;
+    font-size: 0.86rem;
+    color: var(--ink-soft);
+    max-width: 52ch;
+  }
+
+  .aside-card {
+    background: var(--paper-muted);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 1.6rem;
+    margin-bottom: 1.25rem;
+  }
+  .aside-card h2 {
+    font-size: 1.2rem;
+    margin-bottom: 0.5em;
+  }
+  .aside-card p {
+    color: var(--ink-soft);
+    margin-bottom: 0.75rem;
+  }
+  .email-link {
+    font-weight: 600;
+    font-size: 1.05rem;
+    word-break: break-all;
+  }
+</style>

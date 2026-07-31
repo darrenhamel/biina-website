@@ -1,0 +1,109 @@
+---
+import Base from '../layouts/Base.astro';
+import PageHeader from '../components/PageHeader.astro';
+import DevNote from '../components/DevNote.astro';
+import ContactCTA from '../components/ContactCTA.astro';
+import { type Lang } from '../i18n/ui';
+import { institutions } from '../data/institutions';
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const c = institutions[lang];
+---
+
+<Base lang={lang} page="institutions" title={c.title} description={c.description}>
+  <PageHeader eyebrow={c.eyebrow} title={c.heading} lead={c.lead} />
+
+  <!-- Audience -->
+  <section class="section">
+    <div class="container">
+      <h2 class="block-heading">{c.audienceHeading}</h2>
+      <div class="grid grid--3">
+        {
+          c.audience.map((a) => (
+            <article class="card">
+              <h3>{a.title}</h3>
+              <p>{a.body}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- How we'd work -->
+  <section class="section section--muted">
+    <div class="container">
+      <div class="block-head">
+        <h2>{c.howHeading}</h2>
+        <p class="lead">{c.howLead}</p>
+      </div>
+      <div class="grid grid--3">
+        {
+          c.how.map((h, i) => (
+            <article class="card">
+              <span class="card__num">{String(i + 1).padStart(2, '0')}</span>
+              <h3>{h.title}</h3>
+              <p>{h.body}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- What we care about -->
+  <section class="section">
+    <div class="container container-narrow">
+      <h2 class="block-heading">{c.caresHeading}</h2>
+      <ul class="cares">
+        {c.cares.map((item) => <li>{item}</li>)}
+      </ul>
+    </div>
+  </section>
+
+  <section class="section--tight">
+    <div class="container container-narrow">
+      <DevNote label={c.devLabel} text={c.devText} />
+    </div>
+  </section>
+
+  <ContactCTA lang={lang} heading={c.ctaHeading} text={c.ctaText} cta={c.ctaButton} />
+</Base>
+
+<style>
+  .block-heading {
+    margin-bottom: 1.75rem;
+  }
+  .block-head {
+    max-width: 48ch;
+    margin-bottom: 2rem;
+  }
+  .cares {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.9rem;
+  }
+  .cares li {
+    position: relative;
+    padding-inline-start: 1.9rem;
+    font-size: 1.05rem;
+    color: var(--navy-800);
+    margin: 0;
+    padding-block: 0.15rem;
+  }
+  .cares li::before {
+    content: '';
+    position: absolute;
+    inset-inline-start: 0;
+    top: 0.6em;
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 2px;
+    background: var(--accent);
+  }
+</style>

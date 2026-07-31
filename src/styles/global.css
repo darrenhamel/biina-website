@@ -1,0 +1,366 @@
+/* ==========================================================================
+   BIINA.ai — global styles
+   Institutional, restrained. Deep navy base, single blue accent.
+   Works LTR (English / Manrope) and RTL (Arabic / IBM Plex Sans Arabic).
+   ========================================================================== */
+
+:root {
+  /* Brand — navy base */
+  --navy-900: #0a1f3d; /* base */
+  --navy-800: #0e2748;
+  --navy-700: #143363;
+  --navy-600: #1c4483;
+
+  /* Accent — restrained institutional blue */
+  --accent: #2f6bed;
+  --accent-strong: #1f56cf;
+  --accent-soft: #e8f0fe;
+
+  /* Neutrals */
+  --ink: #101a2c; /* body text on light */
+  --ink-soft: #47526b; /* secondary text */
+  --line: #e2e6ee; /* hairlines */
+  --line-strong: #cdd4e2;
+  --paper: #ffffff;
+  --paper-muted: #f6f8fc;
+
+  /* On-dark */
+  --on-dark: #f3f6fc;
+  --on-dark-soft: #b7c2d8;
+  --on-dark-line: rgba(255, 255, 255, 0.14);
+
+  /* Type */
+  --font-latin: 'Manrope', 'IBM Plex Sans Arabic', system-ui, -apple-system,
+    Segoe UI, Roboto, sans-serif;
+  --font-arabic: 'IBM Plex Sans Arabic', 'Manrope', system-ui, -apple-system,
+    Segoe UI, Tahoma, sans-serif;
+
+  /* Layout */
+  --container: 68rem;
+  --container-narrow: 46rem;
+  --radius: 10px;
+  --radius-sm: 7px;
+
+  /* Spacing rhythm */
+  --step: 1.25rem;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-latin);
+  font-size: clamp(1rem, 0.97rem + 0.15vw, 1.075rem);
+  line-height: 1.65;
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Arabic pages get the Arabic-first stack; RTL flows automatically. */
+:root[dir='rtl'] body,
+[dir='rtl'] {
+  font-family: var(--font-arabic);
+}
+
+:root[dir='rtl'] body {
+  line-height: 1.8; /* Arabic reads better with a touch more leading */
+}
+
+/* --- Typography ---------------------------------------------------------- */
+
+h1,
+h2,
+h3,
+h4 {
+  color: var(--navy-900);
+  line-height: 1.18;
+  font-weight: 700;
+  margin: 0 0 0.6em;
+  letter-spacing: -0.011em;
+}
+
+:root[dir='rtl'] h1,
+:root[dir='rtl'] h2,
+:root[dir='rtl'] h3,
+:root[dir='rtl'] h4 {
+  letter-spacing: 0; /* don't tighten Arabic letterforms */
+  line-height: 1.4;
+}
+
+h1 {
+  font-size: clamp(2rem, 1.5rem + 2.4vw, 3.15rem);
+  font-weight: 800;
+}
+
+h2 {
+  font-size: clamp(1.5rem, 1.25rem + 1.1vw, 2.05rem);
+}
+
+h3 {
+  font-size: clamp(1.15rem, 1.05rem + 0.5vw, 1.35rem);
+}
+
+p {
+  margin: 0 0 1.1em;
+}
+
+a {
+  color: var(--accent-strong);
+  text-underline-offset: 3px;
+  text-decoration-thickness: 1px;
+}
+
+a:hover {
+  color: var(--accent);
+}
+
+strong {
+  font-weight: 700;
+  color: var(--navy-800);
+}
+
+ul,
+ol {
+  margin: 0 0 1.1em;
+  padding-inline-start: 1.4em;
+}
+
+li {
+  margin-bottom: 0.5em;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 2.5rem 0;
+}
+
+:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* --- Layout helpers ------------------------------------------------------ */
+
+.container {
+  width: 100%;
+  max-width: var(--container);
+  margin-inline: auto;
+  padding-inline: 1.5rem;
+}
+
+.container-narrow {
+  max-width: var(--container-narrow);
+}
+
+.section {
+  padding-block: clamp(3rem, 2rem + 4vw, 5.5rem);
+}
+
+.section--tight {
+  padding-block: clamp(2.25rem, 1.75rem + 2vw, 3.5rem);
+}
+
+.section--muted {
+  background: var(--paper-muted);
+  border-block: 1px solid var(--line);
+}
+
+.eyebrow {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--accent-strong);
+  margin: 0 0 0.9rem;
+}
+
+:root[dir='rtl'] .eyebrow {
+  letter-spacing: 0.02em;
+}
+
+.lead {
+  font-size: clamp(1.1rem, 1.02rem + 0.4vw, 1.3rem);
+  color: var(--ink-soft);
+  line-height: 1.6;
+  max-width: 42ch;
+}
+
+:root[dir='rtl'] .lead {
+  line-height: 1.85;
+  max-width: 48ch;
+}
+
+.measure {
+  max-width: 62ch;
+}
+
+/* Skip link */
+.skip-link {
+  position: absolute;
+  inset-inline-start: 1rem;
+  top: -3.5rem;
+  z-index: 100;
+  background: var(--navy-900);
+  color: #fff;
+  padding: 0.6rem 1rem;
+  border-radius: var(--radius-sm);
+  transition: top 0.15s ease;
+}
+
+.skip-link:focus {
+  top: 1rem;
+  color: #fff;
+}
+
+/* --- Buttons ------------------------------------------------------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 0.98rem;
+  padding: 0.7rem 1.3rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.btn--primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn--primary:hover {
+  background: var(--accent-strong);
+  color: #fff;
+}
+
+.btn--ghost {
+  background: transparent;
+  color: var(--navy-800);
+  border-color: var(--line-strong);
+}
+
+.btn--ghost:hover {
+  border-color: var(--navy-600);
+  color: var(--navy-900);
+}
+
+/* Directional arrow that flips in RTL */
+.arrow::after {
+  content: '→';
+  display: inline-block;
+  transition: transform 0.15s ease;
+}
+
+:root[dir='rtl'] .arrow::after {
+  content: '←';
+}
+
+.arrow:hover::after {
+  transform: translateX(3px);
+}
+
+:root[dir='rtl'] .arrow:hover::after {
+  transform: translateX(-3px);
+}
+
+/* --- Cards / grids ------------------------------------------------------- */
+
+.grid {
+  display: grid;
+  gap: 1.5rem;
+}
+
+@media (min-width: 46rem) {
+  .grid--2 {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .grid--3 {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.card {
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 1.6rem 1.6rem 1.75rem;
+}
+
+.card h3 {
+  margin-bottom: 0.4em;
+}
+
+.card p:last-child {
+  margin-bottom: 0;
+}
+
+.card__num {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: var(--accent-strong);
+  display: block;
+  margin-bottom: 0.7rem;
+}
+
+/* --- Development notice --------------------------------------------------- */
+
+.dev-note {
+  display: flex;
+  gap: 0.9rem;
+  align-items: flex-start;
+  background: var(--accent-soft);
+  border: 1px solid #cfe0fd;
+  border-radius: var(--radius);
+  padding: 1.15rem 1.3rem;
+}
+
+.dev-note__dot {
+  flex: none;
+  width: 0.7rem;
+  height: 0.7rem;
+  margin-top: 0.45rem;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 4px rgba(47, 107, 237, 0.16);
+}
+
+.dev-note p {
+  margin: 0;
+  color: var(--navy-800);
+}
+
+.dev-note strong {
+  color: var(--navy-900);
+}

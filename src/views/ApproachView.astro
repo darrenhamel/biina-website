@@ -1,0 +1,152 @@
+---
+import Base from '../layouts/Base.astro';
+import PageHeader from '../components/PageHeader.astro';
+import DevNote from '../components/DevNote.astro';
+import ContactCTA from '../components/ContactCTA.astro';
+import { type Lang } from '../i18n/ui';
+import { approach } from '../data/approach';
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const c = approach[lang];
+---
+
+<Base lang={lang} page="approach" title={c.title} description={c.description}>
+  <PageHeader eyebrow={c.eyebrow} title={c.heading} lead={c.lead} />
+
+  <!-- The layers, stacked top-to-bottom (Arabic layer first, foundation last) -->
+  <section class="section">
+    <div class="container">
+      <h2 class="sr-heading">{c.layersHeading}</h2>
+      <ol class="stack">
+        {
+          c.layers.map((layer) => (
+            <li class="stack__item">
+              <div class="stack__index" aria-hidden="true">{layer.index}</div>
+              <div class="stack__body">
+                <p class="stack__role">{layer.role}</p>
+                <h3>{layer.title}</h3>
+                <p class="stack__text">{layer.body}</p>
+              </div>
+            </li>
+          ))
+        }
+      </ol>
+    </div>
+  </section>
+
+  <!-- Why -->
+  <section class="section section--muted">
+    <div class="container container-narrow">
+      <h2>{c.whyHeading}</h2>
+      {c.whyBody.map((para) => <p class="why__p">{para}</p>)}
+    </div>
+  </section>
+
+  <!-- Principles -->
+  <section class="section">
+    <div class="container">
+      <h2 class="principles__heading">{c.principlesHeading}</h2>
+      <div class="grid grid--2">
+        {
+          c.principles.map((p) => (
+            <article class="card">
+              <h3>{p.title}</h3>
+              <p>{p.body}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <section class="section--tight">
+    <div class="container container-narrow">
+      <DevNote label={c.devLabel} text={c.devText} />
+    </div>
+  </section>
+
+  <ContactCTA lang={lang} heading={c.ctaHeading} text={c.ctaText} cta={c.ctaButton} />
+</Base>
+
+<style>
+  .sr-heading {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .stack {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 1.1rem;
+    counter-reset: none;
+  }
+  .stack__item {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 1.25rem;
+    align-items: start;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 1.6rem 1.75rem;
+    margin: 0;
+  }
+  .stack__item:nth-child(1) {
+    border-top: 3px solid #5b8bf5;
+  }
+  .stack__item:nth-child(2) {
+    border-top: 3px solid var(--accent);
+  }
+  .stack__item:nth-child(3) {
+    border-top: 3px solid var(--navy-900);
+  }
+  .stack__index {
+    font-size: 1.6rem;
+    font-weight: 800;
+    color: var(--line-strong);
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+    min-width: 2.2ch;
+  }
+  .stack__role {
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent-strong);
+    margin: 0 0 0.4rem;
+  }
+  :global(:root[dir='rtl']) .stack__role {
+    letter-spacing: 0.02em;
+  }
+  .stack__body h3 {
+    margin-bottom: 0.4em;
+  }
+  .stack__text {
+    margin: 0;
+    color: var(--ink-soft);
+    max-width: 66ch;
+  }
+
+  .why__p {
+    font-size: 1.08rem;
+    color: var(--ink-soft);
+    max-width: 64ch;
+  }
+  :global(:root[dir='rtl']) .why__p {
+    line-height: 1.9;
+  }
+
+  .principles__heading {
+    margin-bottom: 1.75rem;
+  }
+</style>

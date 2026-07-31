@@ -1,0 +1,235 @@
+---
+import Base from '../layouts/Base.astro';
+import DevNote from '../components/DevNote.astro';
+import ContactCTA from '../components/ContactCTA.astro';
+import { routes, type Lang } from '../i18n/ui';
+import { home } from '../data/home';
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const c = home[lang];
+---
+
+<Base lang={lang} page="home" title={c.title} description={c.description}>
+  <!-- Hero -->
+  <section class="hero">
+    <div class="container hero__inner">
+      <p class="hero__eyebrow">{c.heroEyebrow}</p>
+      <h1 class="hero__title">{c.heroTitle}</h1>
+      <p class="hero__sentence">{c.heroSentence}</p>
+      <div class="hero__actions">
+        <a class="btn btn--primary arrow" href={routes.approach[lang]}>{c.ctaApproach}</a>
+        <a class="btn btn--ghost" href={routes.institutions[lang]}>{c.ctaInstitutions}</a>
+      </div>
+    </div>
+    <div class="hero__rule" aria-hidden="true"></div>
+  </section>
+
+  <!-- What we're building -->
+  <section class="section">
+    <div class="container container-narrow">
+      <p class="eyebrow">{c.buildingEyebrow}</p>
+      <p class="statement">{c.buildingStatement}</p>
+    </div>
+  </section>
+
+  <!-- Layered model -->
+  <section class="section section--muted">
+    <div class="container">
+      <div class="section__head">
+        <p class="eyebrow">{c.approachEyebrow}</p>
+        <h2>{c.approachHeading}</h2>
+        <p class="lead">{c.approachLead}</p>
+      </div>
+      <div class="layers">
+        {
+          c.layers.map((layer) => (
+            <article class="layer">
+              <span class="layer__tag">{layer.tag}</span>
+              <h3>{layer.title}</h3>
+              <p>{layer.body}</p>
+            </article>
+          ))
+        }
+      </div>
+      <p class="layers__more">
+        <a class="arrow" href={routes.approach[lang]}>{c.layersMore}</a>
+      </p>
+    </div>
+  </section>
+
+  <!-- For institutions teaser -->
+  <section class="section">
+    <div class="container">
+      <div class="grid grid--2 teaser">
+        <div>
+          <p class="eyebrow">{c.whoEyebrow}</p>
+          <h2>{c.whoHeading}</h2>
+          <p class="measure">{c.whoBody}</p>
+          <p><a class="arrow" href={routes.institutions[lang]}>{c.whoLink}</a></p>
+        </div>
+        <div class="teaser__aside">
+          <ul class="check">
+            {c.checks.map((item) => <li>{item}</li>)}
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Development status -->
+  <section class="section--tight">
+    <div class="container container-narrow">
+      <DevNote label={c.devLabel} text={c.devText} />
+    </div>
+  </section>
+
+  <ContactCTA lang={lang} heading={c.ctaHeading} text={c.ctaText} cta={c.ctaButton} />
+</Base>
+
+<style>
+  .hero {
+    position: relative;
+    background:
+      radial-gradient(90% 120% at 100% -10%, rgba(47, 107, 237, 0.1), transparent 60%),
+      var(--paper);
+    padding-block: clamp(3.25rem, 2rem + 6vw, 6rem);
+  }
+  .hero__eyebrow {
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent-strong);
+    margin: 0 0 1.1rem;
+  }
+  :global(:root[dir='rtl']) .hero__eyebrow {
+    letter-spacing: 0.02em;
+  }
+  .hero__title {
+    max-width: 18ch;
+    margin-bottom: 0.5em;
+  }
+  .hero__sentence {
+    max-width: 54ch;
+    font-size: clamp(1.15rem, 1.05rem + 0.5vw, 1.4rem);
+    line-height: 1.55;
+    color: var(--ink-soft);
+  }
+  :global(:root[dir='rtl']) .hero__sentence {
+    line-height: 1.85;
+    max-width: 60ch;
+  }
+  .hero__actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.85rem;
+    margin-top: 2rem;
+  }
+  .hero__rule {
+    margin-top: clamp(2.5rem, 1.5rem + 4vw, 4rem);
+    height: 4px;
+    max-width: var(--container);
+    margin-inline: auto;
+    background: linear-gradient(90deg, var(--navy-900), var(--accent) 45%, transparent);
+    border-radius: 4px;
+    opacity: 0.85;
+  }
+  :global(:root[dir='rtl']) .hero__rule {
+    background: linear-gradient(270deg, var(--navy-900), var(--accent) 45%, transparent);
+  }
+
+  .statement {
+    font-size: clamp(1.3rem, 1.1rem + 1vw, 1.85rem);
+    line-height: 1.45;
+    font-weight: 500;
+    color: var(--navy-800);
+    margin: 0;
+  }
+  :global(:root[dir='rtl']) .statement {
+    line-height: 1.7;
+  }
+
+  .section__head {
+    max-width: 46ch;
+    margin-bottom: 2.25rem;
+  }
+
+  .layers {
+    display: grid;
+    gap: 1rem;
+  }
+  .layer {
+    position: relative;
+    background: var(--paper);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 1.5rem 1.6rem;
+    border-inline-start: 4px solid var(--accent);
+  }
+  .layer:nth-child(1) {
+    border-inline-start-color: #5b8bf5;
+  }
+  .layer:nth-child(2) {
+    border-inline-start-color: var(--accent);
+  }
+  .layer:nth-child(3) {
+    border-inline-start-color: var(--navy-900);
+  }
+  .layer h3 {
+    margin-bottom: 0.35em;
+  }
+  .layer p {
+    margin: 0;
+    color: var(--ink-soft);
+    max-width: 58ch;
+  }
+  .layer__tag {
+    display: inline-block;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--accent-strong);
+    margin-bottom: 0.6rem;
+  }
+  :global(:root[dir='rtl']) .layer__tag {
+    letter-spacing: 0.02em;
+  }
+  .layers__more {
+    margin: 1.6rem 0 0;
+  }
+
+  .teaser__aside {
+    display: flex;
+    align-items: center;
+  }
+  .check {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: grid;
+    gap: 0.85rem;
+    width: 100%;
+  }
+  .check li {
+    position: relative;
+    padding-inline-start: 1.9rem;
+    color: var(--navy-800);
+    font-weight: 500;
+    margin: 0;
+  }
+  .check li::before {
+    content: '';
+    position: absolute;
+    inset-inline-start: 0;
+    top: 0.45em;
+    width: 0.85rem;
+    height: 0.85rem;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    border: 2px solid var(--accent);
+  }
+</style>

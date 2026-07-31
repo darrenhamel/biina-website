@@ -1,0 +1,22 @@
+---
+// Layered mark — three stacked bars echo BIINA's layered model
+// (infrastructure → application → Arabic layer). Decorative; text conveys brand.
+interface Props {
+  class?: string;
+}
+const { class: className } = Astro.props;
+---
+
+<svg
+  class={className}
+  width="26"
+  height="26"
+  viewBox="0 0 26 26"
+  fill="none"
+  aria-hidden="true"
+  focusable="false"
+>
+  <rect x="3" y="16.5" width="20" height="4" rx="2" fill="var(--navy-900)"></rect>
+  <rect x="5.5" y="10.5" width="15" height="4" rx="2" fill="var(--accent)"></rect>
+  <rect x="8" y="4.5" width="10" height="4" rx="2" fill="var(--accent-strong)"></rect>
+</svg>

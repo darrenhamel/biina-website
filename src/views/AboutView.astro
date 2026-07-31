@@ -1,0 +1,123 @@
+---
+import Base from '../layouts/Base.astro';
+import PageHeader from '../components/PageHeader.astro';
+import DevNote from '../components/DevNote.astro';
+import ContactCTA from '../components/ContactCTA.astro';
+import { t, type Lang } from '../i18n/ui';
+import { about } from '../data/about';
+
+interface Props {
+  lang: Lang;
+}
+const { lang } = Astro.props;
+const c = about[lang];
+const s = t(lang);
+---
+
+<Base lang={lang} page="about" title={c.title} description={c.description}>
+  <PageHeader eyebrow={c.eyebrow} title={c.heading} lead={c.lead} />
+
+  <!-- Facts strip -->
+  <section class="section--tight facts-section">
+    <div class="container">
+      <dl class="facts">
+        {
+          c.facts.map((f) => (
+            <div class="fact">
+              <dt>{f.label}</dt>
+              <dd>{f.value}</dd>
+            </div>
+          ))
+        }
+      </dl>
+    </div>
+  </section>
+
+  <!-- What we're doing + why, two prose blocks -->
+  <section class="section">
+    <div class="container container-narrow prose">
+      <h2>{c.bodyHeading}</h2>
+      {c.body.map((para) => <p>{para}</p>)}
+
+      <h2 class="prose__next">{c.whyHeading}</h2>
+      {c.whyBody.map((para) => <p>{para}</p>)}
+    </div>
+  </section>
+
+  <!-- Team + contact -->
+  <section class="section section--muted">
+    <div class="container">
+      <div class="grid grid--2">
+        <article class="card">
+          <h3>{c.teamHeading}</h3>
+          <p>{c.teamBody}</p>
+        </article>
+        <article class="card">
+          <h3>{c.contactHeading}</h3>
+          <p>{c.contactBody}</p>
+          <p><a class="arrow" href={`mailto:${s.email}`}>{s.email}</a></p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="section--tight">
+    <div class="container container-narrow">
+      <DevNote label={c.devLabel} text={c.devText} />
+    </div>
+  </section>
+
+  <ContactCTA lang={lang} heading={c.ctaHeading} text={c.ctaText} cta={c.ctaButton} />
+</Base>
+
+<style>
+  .facts-section {
+    border-bottom: 1px solid var(--line);
+  }
+  .facts {
+    display: grid;
+    gap: 1.25rem;
+    margin: 0;
+  }
+  @media (min-width: 46rem) {
+    .facts {
+      grid-template-columns: repeat(3, 1fr);
+      gap: 2rem;
+    }
+  }
+  .fact {
+    border-inline-start: 3px solid var(--accent);
+    padding-inline-start: 1rem;
+  }
+  .fact dt {
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--accent-strong);
+    margin-bottom: 0.35rem;
+  }
+  :global(:root[dir='rtl']) .fact dt {
+    letter-spacing: 0.02em;
+  }
+  .fact dd {
+    margin: 0;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--navy-900);
+  }
+
+  .prose h2 {
+    margin-bottom: 0.6em;
+  }
+  .prose p {
+    color: var(--ink-soft);
+    max-width: 64ch;
+  }
+  :global(:root[dir='rtl']) .prose p {
+    line-height: 1.9;
+  }
+  .prose__next {
+    margin-top: 2.5rem;
+  }
+</style>
