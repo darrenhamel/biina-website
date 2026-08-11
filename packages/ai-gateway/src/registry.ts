@@ -51,6 +51,8 @@ export function getConfig(): GatewayConfig {
 export function listModels(): ModelDescriptor[] {
   const e = env();
   const ollamaModel = e.OLLAMA_MODEL || DEFAULTS.ollamaModel;
+  const oaiBase = e.OPENAI_COMPATIBLE_BASE_URL;
+  const oaiModel = e.OPENAI_COMPATIBLE_MODEL;
 
   const models: ModelDescriptor[] = [
     {
@@ -67,6 +69,18 @@ export function listModels(): ModelDescriptor[] {
       provider: 'ollama',
       providerModel: ollamaModel,
       enabled: true,
+      capabilities: { chat: true, streaming: true },
+    },
+    {
+      // Customer-facing "BIINA" — the underlying infra model (Qwen/Llama/…) is
+      // hidden behind providerModel and NEVER shown in the consumer UI. Enabled
+      // only once a base URL + model are configured (so it never silently
+      // resolves to a misconfigured remote endpoint).
+      id: 'biina-general',
+      label: 'BIINA',
+      provider: 'openai-compatible',
+      providerModel: oaiModel,
+      enabled: Boolean(oaiBase && oaiModel),
       capabilities: { chat: true, streaming: true },
     },
   ];
@@ -86,14 +100,18 @@ export function resolveModel(modelId?: string): ModelDescriptor {
   if (wanted) {
     const hit = models.find((m) => m.id === wanted);
     if (hit) return hit;
+    // An explicit unknown id falls through to the provider default below rather
+    // than erroring — user input never becomes a vendor model or URL.
   }
   const byProvider = models.find((m) => m.provider === defaultProvider);
   if (byProvider) return byProvider;
 
-  if (models.length === 0) {
-    throw new GatewayError('invalid_config', 'No enabled models in the registry');
-  }
-  return models[0];
+  // The configured default provider has no ENABLED model. Fail clearly instead
+  // of silently using a different provider (e.g. openai-compatible not yet set up).
+  throw new GatewayError(
+    'invalid_config',
+    `No enabled model for provider "${defaultProvider}". Check its base URL / model configuration.`,
+  );
 }
 
 // Lazily instantiated provider singletons.
@@ -101,7 +119,6 @@ const providerInstances: Partial<Record<ProviderName, AIProvider>> = {};
 
 function instantiate(name: ProviderName): AIProvider {
   const e = env();
-  const timeoutMs = num(e.OLLAMA_REQUEST_TIMEOUT_MS ?? e.AI_REQUEST_TIMEOUT_MS, DEFAULTS.requestTimeoutMs);
 
   switch (name) {
     case 'mock':
@@ -109,13 +126,17 @@ function instantiate(name: ProviderName): AIProvider {
     case 'ollama':
       return new OllamaProvider({
         baseUrl: e.OLLAMA_BASE_URL || DEFAULTS.ollamaBaseUrl,
-        timeoutMs,
+        timeoutMs: num(e.OLLAMA_REQUEST_TIMEOUT_MS ?? e.AI_REQUEST_TIMEOUT_MS, DEFAULTS.requestTimeoutMs),
       });
     case 'openai-compatible':
       return new OpenAICompatibleProvider({
         baseUrl: e.OPENAI_COMPATIBLE_BASE_URL,
         apiKey: e.OPENAI_COMPATIBLE_API_KEY,
-        timeoutMs,
+        timeoutMs: num(
+          e.OPENAI_COMPATIBLE_REQUEST_TIMEOUT_MS ?? e.AI_REQUEST_TIMEOUT_MS,
+          DEFAULTS.requestTimeoutMs,
+        ),
+        maxConnectRetries: num(e.OPENAI_COMPATIBLE_MAX_RETRIES, 1),
       });
     default:
       // Unknown provider: fail clearly rather than silently talking to a vendor

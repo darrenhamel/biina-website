@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
     const history = await listMessages(finalConvId);
     const chatMessages: ChatMessage[] = history.map((m) => ({ role: m.role, content: m.content }));
 
-    const { requestId, provider, model: resolvedModel, stream } = startAssistantReply({
+    const { requestId, provider, model: resolvedModel, meta, stream } = startAssistantReply({
       messages: chatMessages,
       model,
       signal: req.signal,
@@ -105,8 +105,9 @@ export async function POST(req: NextRequest) {
                 conversationId: finalConvId,
                 role: 'assistant',
                 content: assistantText,
-                provider,
-                model: resolvedModel,
+                // Effective provider/model (accurate even if fallback engaged).
+                provider: meta.provider,
+                model: meta.model,
               });
             } catch (err) {
               logger.error('ai.chat.persist_error', { requestId, error: String(err) });

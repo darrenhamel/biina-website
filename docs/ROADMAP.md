@@ -59,13 +59,17 @@ Legend: ☐ not started · ◐ in progress · ☑ done
 - ☐ Security hardening (headers, secure cookies, rate limiting, CORS, DB not exposed).
 - ☐ `docs/PRODUCTION_DEPLOYMENT.md` + full deployment checklist. **No deploy.**
 
-## Phase 6 — Production AI inference  ☐  *(build prompt 7)*
+## Phase 6 — Production AI inference (OpenAI-compatible vLLM / RunPod)  ☑  *(build prompt 7)*
 
-- ☐ Wire production vLLM through the existing OpenAI-compatible provider (config only).
-- ☐ Connection test, provider health check, timeouts, safe retries, correlation IDs.
-- ☐ User-facing vs. internal error separation. Optional, admin-gated fallback
-  (never silent, never auto-fallback to a paid model).
-- ☐ Document exactly what to obtain from the GPU provider.
+- ☑ Real `OpenAICompatibleProvider` (SSE `/v1/chat/completions`), wired via config only.
+- ☑ Connection test + provider health check + configured-model verification (admin).
+- ☑ Per-provider timeouts, conservative connect-only retries, correlation IDs, cancellation.
+- ☑ User-facing vs. internal error separation (full remote-failure normalization).
+- ☑ Optional admin-gated fallback (off by default, never silent, never mid-stream, no loops).
+- ☑ Latency (TTFT) metrics + in-memory admin metrics; `docs/VLLM_DEPLOYMENT.md` + `docs/RUNPOD_SETUP.md`.
+- ☑ Proven end-to-end against a local mock OpenAI-compatible server (exact-text probe, streaming,
+  persistence, usage). ◐ Real RunPod endpoint pending user-supplied credentials.
+- **Deliverable:** cloud-inference-ready; local Ollama ↔ cloud vLLM is a config switch. No deploy.
 
 ## Phase 7 — Pre-launch audit  ☐  *(build prompt 8)*
 

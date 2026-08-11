@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getConfig, providerDiagnostics } from '@biina/ai-gateway';
 import { getCurrentUser } from '@/server/auth/session';
 import { unauthorized, forbidden, handleError } from '@/lib/api';
+import { metricsSnapshot } from '@/server/ai/metrics';
 
 /**
  * GET /api/ai/health — ADMIN-only AI diagnostics.
@@ -39,6 +40,13 @@ export async function GET() {
       availableModels: diag.availableModels ?? [],
       detail: diag.health.detail,
       latencyMs: diag.health.latencyMs,
+      // Optional fallback posture (never a secret). Disabled by default.
+      fallback: {
+        enabled: process.env.AI_FALLBACK_ENABLED === 'true',
+        model: process.env.AI_FALLBACK_MODEL || null,
+      },
+      // Basic in-process admin metrics (see metrics.ts — not durable analytics).
+      metrics: metricsSnapshot(),
       time: new Date().toISOString(),
     };
 

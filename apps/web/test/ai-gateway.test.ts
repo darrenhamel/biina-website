@@ -60,6 +60,48 @@ describe('model registry', () => {
   });
 });
 
+describe('openai-compatible registry entry', () => {
+  afterEach(() => {
+    delete process.env.OPENAI_COMPATIBLE_BASE_URL;
+    delete process.env.OPENAI_COMPATIBLE_MODEL;
+    delete process.env.AI_DEFAULT_PROVIDER;
+    process.env.AI_DEFAULT_PROVIDER = 'mock';
+    __resetProviderCache();
+  });
+
+  it('is disabled until a base URL + model are configured', () => {
+    delete process.env.OPENAI_COMPATIBLE_BASE_URL;
+    delete process.env.OPENAI_COMPATIBLE_MODEL;
+    const entry = listModels().find((m) => m.id === 'biina-general')!;
+    expect(entry.provider).toBe('openai-compatible');
+    expect(entry.enabled).toBe(false);
+    expect(entry.label).toBe('BIINA'); // customer-facing, no infra name
+  });
+
+  it('is enabled and hides the infra model behind providerModel once configured', () => {
+    process.env.OPENAI_COMPATIBLE_BASE_URL = 'https://infer.example.com';
+    process.env.OPENAI_COMPATIBLE_MODEL = 'Qwen/Qwen2.5-7B-Instruct';
+    const entry = listModels().find((m) => m.id === 'biina-general')!;
+    expect(entry.enabled).toBe(true);
+    expect(entry.providerModel).toBe('Qwen/Qwen2.5-7B-Instruct');
+    expect(entry.label).not.toContain('Qwen'); // never expose infra model in the display name
+  });
+
+  it('fails clearly when the default provider has no enabled model', () => {
+    process.env.AI_DEFAULT_PROVIDER = 'openai-compatible';
+    delete process.env.OPENAI_COMPATIBLE_BASE_URL; // not configured -> entry disabled
+    delete process.env.OPENAI_COMPATIBLE_MODEL;
+    __resetProviderCache();
+    try {
+      resolveModel();
+      throw new Error('should have thrown');
+    } catch (err) {
+      expect(isGatewayError(err)).toBe(true);
+      if (isGatewayError(err)) expect(err.code).toBe('invalid_config');
+    }
+  });
+});
+
 describe('provider router', () => {
   it('returns the right provider instance by name', () => {
     expect(getProvider('mock').name).toBe('mock');

@@ -140,9 +140,12 @@ provider, inputTokens, outputTokens, totalTokens, latencyMs, requestId, status }
    HTTP API (`OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_REQUEST_TIMEOUT_MS`). Parses
    Ollama's NDJSON stream into the provider-agnostic `ChatChunk` contract; normalizes
    usage (`prompt_eval_count`/`eval_count`/`total_duration`) and errors.
-3. **`OpenAICompatibleProvider`** — Phase-3 **readiness stub**. Structured and in the
-   router now (`OPENAI_COMPATIBLE_BASE_URL/_API_KEY/_MODEL`) but not active; calling it
-   fails clearly rather than silently using a paid endpoint.
+3. **`OpenAICompatibleProvider`** ✅ *(Phase 3, implemented)* — any OpenAI-compatible
+   endpoint (vLLM, RunPod-hosted vLLM, self-hosted). SSE `/v1/chat/completions`
+   normalized to `ChatChunk`; usage from the final chunk; optional `Bearer` auth
+   (`OPENAI_COMPATIBLE_BASE_URL/_API_KEY/_MODEL/_REQUEST_TIMEOUT_MS`). Deliberately
+   generic — **RunPod is just a base URL**, no vendor-specific code. Switching
+   Ollama ↔ vLLM is config only. See `docs/VLLM_DEPLOYMENT.md` / `docs/RUNPOD_SETUP.md`.
 
 **Later, without any frontend change:** `OpenAIProvider`, `AnthropicProvider`,
 `GeminiProvider`, DeepSeek, Qwen — each a new adapter implementing `AIProvider`,
@@ -154,11 +157,32 @@ registered in the model registry. See [Adding a provider](#8-adding-a-provider-l
 and HTTP status; technical detail is logged server-side only.
 
 **Cross-cutting concerns handled in the gateway/service (not in the UI):**
-streaming, per-request timeouts, provider error normalization, graceful failure,
-request & conversation IDs, token/usage metadata, structured server-side logging.
-The route pulls the first chunk before responding, so connection/model/config
-failures return a proper status instead of a broken `200` stream.
+streaming, per-request timeouts, conservative connect retries (setup-only, never
+after streaming has begun — no duplicate generation/cost), provider error
+normalization, graceful failure, request & conversation IDs, token/usage
+metadata, latency metrics (time-to-first-token + total), structured server-side
+logging. The route pulls the first chunk before responding, so connection/model/
+config failures return a proper status instead of a broken `200` stream.
 **API keys are never logged.**
+
+### Optional fallback (off by default)
+
+A single, pre-stream, non-looping fallback is available but **disabled by
+default** and never silent: it requires `AI_FALLBACK_ENABLED=true` + a configured
+`AI_FALLBACK_MODEL` on a **different** provider. It engages only before any token
+has streamed (so it never duplicates generation or usage cost), never falls back
+to the same provider, and logs a `ai.chat.failover` event. Never point it at a
+paid provider unintentionally.
+
+### SSRF posture
+
+The app now connects to a **configurable** remote URL, so provider endpoints come
+**only** from trusted server env (`OPENAI_COMPATIBLE_BASE_URL`), never from user
+input. A user's chat request carries message text and an optional **logical**
+model id that is matched against the registry — it can never become a URL or a
+vendor model name (`resolveModel` maps to a server-defined descriptor; unknown
+ids fall back to the provider default). The provider also rejects non-`http(s)`
+base URLs. Operators should point the base URL only at trusted endpoints.
 
 ### System prompt (server-side, layered)
 

@@ -80,11 +80,14 @@ essentials for Phase 1:
 |---|---|
 | `DATABASE_URL` | Postgres connection string |
 | `AUTH_SECRET` | Session signing secret (generate a long random value) |
-| `AI_DEFAULT_PROVIDER` | `mock` (default) or `ollama` |
+| `AI_DEFAULT_PROVIDER` | `mock` (default), `ollama`, or `openai-compatible` |
 | `AI_DEFAULT_MODEL` | Optional logical model id; auto-selected if unset |
-| `OLLAMA_BASE_URL` | Ollama endpoint (default `http://localhost:11434`) |
-| `OLLAMA_MODEL` | Ollama model tag (e.g. `llama3.2:3b`) |
-| `OLLAMA_REQUEST_TIMEOUT_MS` | Per-request generation timeout (default 120000) |
+| `OLLAMA_BASE_URL` / `OLLAMA_MODEL` | Ollama endpoint + model tag (Phase 2) |
+| `OLLAMA_REQUEST_TIMEOUT_MS` | Ollama per-request timeout (default 120000) |
+| `OPENAI_COMPATIBLE_BASE_URL` | Remote vLLM/OpenAI-compatible endpoint (Phase 3) |
+| `OPENAI_COMPATIBLE_API_KEY` | Bearer key, server-side only (optional) |
+| `OPENAI_COMPATIBLE_MODEL` | Served model name (hidden from the UI) |
+| `AI_FALLBACK_ENABLED` / `AI_FALLBACK_MODEL` | Optional fallback (off by default) |
 
 **Secrets are server-side only and never logged.** Real `.env*` files are
 git-ignored; keep them out of version control.
@@ -154,6 +157,41 @@ registry/env, never hard-coded in components.
 
 > The consumer UI never shows "Ollama" — the model provider is infrastructure.
 
+## Cloud AI (OpenAI-compatible: vLLM / RunPod)
+
+For production, BIINA connects to any **OpenAI-compatible** endpoint (vLLM,
+RunPod-hosted vLLM, self-hosted vLLM, …) through the same gateway. **Switching
+from local Ollama to cloud inference is configuration only — no code changes.**
+
+Set in the **server** environment (never the browser, never git):
+
+```bash
+AI_DEFAULT_PROVIDER=openai-compatible
+AI_DEFAULT_MODEL=biina-general
+OPENAI_COMPATIBLE_BASE_URL=https://your-endpoint        # root or its /v1 form; both work
+OPENAI_COMPATIBLE_API_KEY=your-secret-key               # omit for unauthenticated private endpoints
+OPENAI_COMPATIBLE_MODEL=Qwen/Qwen2.5-7B-Instruct        # the infra model; hidden from the UI
+OPENAI_COMPATIBLE_REQUEST_TIMEOUT_MS=120000             # generous, to ride out serverless cold starts
+```
+
+Verify (as an ADMIN): `GET /api/ai/health` →
+`provider: openai-compatible · providerConnection: ok · configuredModel: ok`.
+
+- **Deployment:** see [`docs/VLLM_DEPLOYMENT.md`](./docs/VLLM_DEPLOYMENT.md) (model
+  sizing, VRAM, quantization, startup flags, cold starts, scaling).
+- **RunPod, step by step:** see [`docs/RUNPOD_SETUP.md`](./docs/RUNPOD_SETUP.md).
+- **Optional fallback** (disabled by default, never silent, never mid-stream):
+  `AI_FALLBACK_ENABLED=true` + `AI_FALLBACK_MODEL=<logical id of a different provider>`.
+
+### Troubleshooting remote inference
+
+| Symptom | Likely cause | Fix |
+|---|---|---|
+| chat 503 "temporarily unavailable" | endpoint down / cold start / timeout | raise `OPENAI_COMPATIBLE_REQUEST_TIMEOUT_MS`; retry |
+| `configuredModel: missing` in diagnostics | model name ≠ served name | match `OPENAI_COMPATIBLE_MODEL` to `/v1/models` |
+| `invalid_config` / auth failed | wrong/missing API key | re-set `OPENAI_COMPATIBLE_API_KEY` |
+| `providerConnection: error` | wrong base URL / unreachable | check URL scheme/host; endpoint must be http(s) |
+
 ## Adding another AI provider
 
 The whole point of the gateway is that new providers require **no frontend or DB
@@ -183,8 +221,12 @@ health check, EN/AR + RTL.
 **Added (Phase 2):** real **Ollama provider** + provider router in the gateway,
 env-driven model registry, normalized streaming, typed error handling
 (`GatewayError`), server-side system-prompt composition, request-id logging with
-usage metrics, admin AI diagnostics (`/api/ai/health`), and an OpenAI-compatible
-**stub** ready for Phase 3.
+usage metrics, admin AI diagnostics (`/api/ai/health`).
 
-**Deferred:** production vLLM/OpenAI-compatible (Phase 3), usage metering & plans
-(Phase 4). See [`docs/ROADMAP.md`](./docs/ROADMAP.md).
+**Added (Phase 3):** real **OpenAI-compatible provider** (vLLM/RunPod-ready) with
+SSE streaming, per-provider timeouts, conservative connect retries, cancellation,
+full error normalization, latency (TTFT) metrics, optional admin-configured
+fallback (off by default), in-memory admin metrics, and vLLM/RunPod deployment
+docs. Local Ollama ↔ cloud vLLM is a **config-only** switch.
+
+**Deferred:** usage metering & plans (Phase 4). See [`docs/ROADMAP.md`](./docs/ROADMAP.md).
