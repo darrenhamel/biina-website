@@ -1,57 +1,70 @@
 import { NextResponse } from 'next/server';
-import { getConfig, providerDiagnostics } from '@biina/ai-gateway';
-import { getCurrentUser } from '@/server/auth/session';
-import { unauthorized, forbidden, handleError } from '@/lib/api';
+import { getProvider } from '@biina/ai-gateway';
+import { requireAdmin } from '@/server/auth/guards';
+import { loadAiConfig } from '@/server/ai/catalog';
+import { selectRoute, validateConfig } from '@/server/ai/routing';
 import { metricsSnapshot } from '@/server/ai/metrics';
+import { handleError } from '@/lib/api';
 
 /**
- * GET /api/ai/health — ADMIN-only AI diagnostics.
+ * GET /api/ai/health — ADMIN-only AI diagnostics, now DB-routing aware.
  *
- * Reports the normalized status of the AI stack and, where the provider can
- * enumerate models, whether the configured model actually exists. This is the
- * model-discovery surface; it is admin-gated so infrastructure detail is not
- * exposed publicly. Never returns secrets (base URLs/keys are omitted).
+ * Resolves the current DEFAULT route, live-probes that provider, and reports
+ * config problems + metrics. Never returns secrets (URLs/keys omitted).
  */
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function GET() {
+  const auth = await requireAdmin();
+  if ('response' in auth) return auth.response;
   try {
-    const user = await getCurrentUser();
-    if (!user) return unauthorized();
-    if (user.role !== 'ADMIN') return forbidden('Administrator access required');
+    const snap = await loadAiConfig(true);
+    const problems = validateConfig(snap);
 
-    const cfg = getConfig();
-    const diag = await providerDiagnostics();
+    let route: { biinaModel: string; provider: string; providerModel: string; reason: string } | null = null;
+    let providerConnection: 'ok' | 'error' | 'unknown' = 'unknown';
+    let configuredModel: 'ok' | 'missing' | 'unknown' = 'unknown';
+    let detail: string | undefined;
+    let latencyMs: number | undefined;
 
-    const configuredModelOk =
-      diag.configuredModelPresent === undefined ? 'unknown' : diag.configuredModelPresent ? 'ok' : 'missing';
+    try {
+      const d = selectRoute({ isAdmin: true }, snap);
+      route = { biinaModel: d.biinaModelSlug, provider: d.providerType, providerModel: d.providerModel, reason: d.reason };
+      const health = await getProvider(d.providerType).health();
+      providerConnection = health.ok ? 'ok' : 'error';
+      detail = health.detail;
+      latencyMs = health.latencyMs;
+      if (health.ok && typeof getProvider(d.providerType).discoverModels === 'function') {
+        const available = (await getProvider(d.providerType).discoverModels!()) ?? [];
+        if (available.length > 0) {
+          configuredModel = available.some(
+            (m) => m === d.providerModel || m.split(':')[0] === d.providerModel.split(':')[0],
+          )
+            ? 'ok'
+            : 'missing';
+        }
+      }
+    } catch (err) {
+      detail = err instanceof Error ? err.message : 'routing error';
+    }
 
-    const status = {
-      application: 'ok' as const,
-      aiGateway: 'ok' as const,
-      provider: diag.provider,
-      providerConnection: diag.health.ok ? ('ok' as const) : ('error' as const),
-      configuredModel: configuredModelOk,
-      defaultProvider: cfg.defaultProvider,
-      // Non-secret: which logical/vendor model the gateway resolved.
-      model: diag.configuredModel,
-      // Only names, no infra endpoints.
-      availableModels: diag.availableModels ?? [],
-      detail: diag.health.detail,
-      latencyMs: diag.health.latencyMs,
-      // Optional fallback posture (never a secret). Disabled by default.
-      fallback: {
-        enabled: process.env.AI_FALLBACK_ENABLED === 'true',
-        model: process.env.AI_FALLBACK_MODEL || null,
+    const healthy = problems.length === 0 && providerConnection !== 'error' && configuredModel !== 'missing';
+    return NextResponse.json(
+      {
+        application: 'ok',
+        aiGateway: 'ok',
+        defaultRoute: route,
+        providerConnection,
+        configuredModel,
+        detail,
+        latencyMs,
+        problems,
+        metrics: metricsSnapshot(),
+        time: new Date().toISOString(),
       },
-      // Basic in-process admin metrics (see metrics.ts — not durable analytics).
-      metrics: metricsSnapshot(),
-      time: new Date().toISOString(),
-    };
-
-    const healthy = diag.health.ok && configuredModelOk !== 'missing';
-    return NextResponse.json(status, { status: healthy ? 200 : 503 });
+      { status: healthy ? 200 : 503 },
+    );
   } catch (err) {
     return handleError(err, 'ai.health');
   }

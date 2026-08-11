@@ -53,6 +53,7 @@ export interface SessionUser {
   id: string;
   email: string;
   role: 'USER' | 'ADMIN';
+  plan: 'FREE' | 'PRO' | 'BUSINESS' | 'ENTERPRISE' | 'ADMIN';
   createdAt: Date;
   displayName: string;
   locale: string;
@@ -70,6 +71,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
       userId: users.id,
       email: users.email,
       role: users.role,
+      plan: users.plan,
       createdAt: users.createdAt,
       displayName: profiles.displayName,
       locale: profiles.locale,
@@ -88,6 +90,7 @@ export async function getCurrentUser(): Promise<SessionUser | null> {
     id: row.userId,
     email: row.email,
     role: row.role,
+    plan: row.plan,
     createdAt: row.createdAt,
     displayName: row.displayName ?? row.email.split('@')[0],
     locale: row.locale ?? 'en',

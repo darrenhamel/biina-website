@@ -103,6 +103,8 @@ const en = {
     subtitle: 'Basic administration. Full tools arrive in a later phase.',
     usersHeading: 'Overview',
     restricted: 'You need administrator access to view this area.',
+    aiControl: 'AI Control',
+    aiControlSub: 'Models, providers, routing, and fallback.',
   },
 };
 
@@ -203,6 +205,8 @@ const ar: Dictionary = {
     subtitle: 'إدارة أساسية. تصل الأدوات الكاملة في مرحلة لاحقة.',
     usersHeading: 'نظرة عامة',
     restricted: 'تحتاج إلى صلاحية مسؤول لعرض هذه المنطقة.',
+    aiControl: 'التحكم بالذكاء الاصطناعي',
+    aiControlSub: 'النماذج والمزوّدون والتوجيه والاحتياط.',
   },
 };
 

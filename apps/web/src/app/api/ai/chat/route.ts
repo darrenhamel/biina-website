@@ -8,23 +8,20 @@ import {
   listMessages,
 } from '@/server/conversations';
 import { startAssistantReply } from '@/server/ai/service';
+import type { RouteContext } from '@/server/ai/routing';
+import { isWorkload } from '@/config/ai-routing';
 import { chatRequestSchema } from '@/lib/validation';
 import { unauthorized, notFound, handleError } from '@/lib/api';
 import { logger } from '@/lib/logger';
 
 /**
- * POST /api/ai/chat — the ONE endpoint the UI uses for AI.
+ * POST /api/ai/chat — the ONE endpoint the UI uses for AI. Unchanged contract.
  *
- * The browser never talks to a model vendor. This route:
- *   1. authenticates + validates,
- *   2. persists the user message (creating a conversation if needed),
- *   3. asks the AI service (→ gateway → provider) for a streamed reply,
- *   4. pulls the first chunk so provider errors return a clean status BEFORE the
- *      stream starts (once bytes flow, the status is already 200),
- *   5. streams plain-text deltas to the client,
- *   6. persists the finished assistant message with provider/model metadata.
- *
- * Provider selection is invisible to the client.
+ * Provider/model are now chosen by the DB-backed routing engine from a validated
+ * routing context (never from raw privileged parameters — a normal user can only
+ * hint a workload and request an APPROVED, visible BIINA model slug). The route
+ * pulls the first chunk before responding so routing/provider errors return a
+ * proper status instead of a broken 200 stream.
  */
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -34,42 +31,50 @@ export async function POST(req: NextRequest) {
     const user = await getCurrentUser();
     if (!user) return unauthorized();
 
-    const { conversationId, message, model } = chatRequestSchema.parse(await req.json());
+    const { conversationId, message, model, workload } = chatRequestSchema.parse(await req.json());
 
-    // Resolve or create the conversation (ownership enforced).
     let convId = conversationId;
     if (convId) {
       const owned = await getOwnedConversation(user.id, convId);
       if (!owned) return notFound('Conversation not found');
     } else {
       const title = message.slice(0, 60);
-      const created = await createConversation(user.id, title || 'New conversation', model);
+      const created = await createConversation(user.id, title || 'New conversation');
       convId = created.id;
     }
     const finalConvId = convId;
 
-    // Persist the user's message, then build the full history for the provider.
     await addMessage({ conversationId: finalConvId, role: 'user', content: message });
     const history = await listMessages(finalConvId);
     const chatMessages: ChatMessage[] = history.map((m) => ({ role: m.role, content: m.content }));
 
-    const { requestId, provider, model: resolvedModel, meta, stream } = startAssistantReply({
+    // Build a validated routing context. Privileged fields (plan, isAdmin) come
+    // from the authenticated session, NOT from the request body.
+    const routeContext: RouteContext = {
+      userId: user.id,
+      userPlan: user.plan,
+      isAdmin: user.role === 'ADMIN',
+      persona: user.personaId,
+      workload: workload && isWorkload(workload) ? workload : undefined,
+      requestedModelSlug: model ?? undefined,
+    };
+
+    const { requestId, meta, stream } = startAssistantReply({
       messages: chatMessages,
-      model,
+      routeContext,
       signal: req.signal,
       conversationId: finalConvId,
-      userId: user.id,
       promptContext: { personaId: user.personaId, locale: user.locale },
     });
 
-    // Pull the first chunk up front: connection / model / config errors surface
-    // here (before any bytes) so we can return a proper status + safe message.
+    // Pull the first chunk up front: routing errors + connection/model/config
+    // failures surface here (before any bytes) with a proper status + safe message.
     const iterator = stream[Symbol.asyncIterator]();
     let first: IteratorResult<ChatChunk>;
     try {
       first = await iterator.next();
     } catch (err) {
-      const ge = toGatewayError(err, provider);
+      const ge = toGatewayError(err, meta.provider || 'routing');
       if (ge.code === 'cancelled') return new NextResponse(null, { status: 499 });
       return NextResponse.json(
         { error: ge.userMessage(), code: ge.code, requestId },
@@ -78,7 +83,6 @@ export async function POST(req: NextRequest) {
     }
 
     const encoder = new TextEncoder();
-
     const body = new ReadableStream<Uint8Array>({
       async start(controller) {
         let assistantText = '';
@@ -96,7 +100,6 @@ export async function POST(req: NextRequest) {
             push(next.value);
           }
         } catch (err) {
-          // Mid-stream failure (status already 200). Logged in the service too.
           logger.warn('ai.chat.stream_interrupted', { requestId, error: String(err) });
         } finally {
           if (assistantText.trim().length > 0) {
@@ -105,9 +108,8 @@ export async function POST(req: NextRequest) {
                 conversationId: finalConvId,
                 role: 'assistant',
                 content: assistantText,
-                // Effective provider/model (accurate even if fallback engaged).
-                provider: meta.provider,
-                model: meta.model,
+                provider: meta.provider, // effective provider TYPE
+                model: meta.model, // effective BIINA model slug
               });
             } catch (err) {
               logger.error('ai.chat.persist_error', { requestId, error: String(err) });
@@ -117,7 +119,6 @@ export async function POST(req: NextRequest) {
         }
       },
       cancel() {
-        // Client disconnected / stop pressed — propagate cancellation to the provider.
         void iterator.return?.(undefined);
       },
     });
@@ -129,8 +130,9 @@ export async function POST(req: NextRequest) {
         'Cache-Control': 'no-store, no-transform',
         'X-Biina-Conversation-Id': finalConvId,
         'X-Biina-Request-Id': requestId,
-        'X-Biina-Provider': provider,
-        'X-Biina-Model': resolvedModel,
+        // Consumer-safe: provider TYPE + BIINA logical model (never the infra model name).
+        'X-Biina-Provider': meta.provider,
+        'X-Biina-Model': meta.model,
       },
     });
   } catch (err) {

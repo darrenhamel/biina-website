@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import {
-  streamChat,
+  streamChatRoute,
   toGatewayError,
   type ChatMessage,
   type ChatChunk,
@@ -8,22 +8,23 @@ import {
 } from '@biina/ai-gateway';
 import { logger } from '@/lib/logger';
 import { withSystemPrompt, type SystemPromptContext } from './system-prompt';
-import { resolveFallbackPlan } from './fallback';
 import { recordRequest, recordResult } from './metrics';
+import { loadAiConfig } from './catalog';
+import { selectRoute, selectFallback, type RouteContext, type RouteDecision } from './routing';
 
 /**
  * BIINA server-side AI service — the ONLY hop between the API route and the AI
- * gateway. Cross-cutting concerns live here: request ids, system prompt,
- * timeouts, structured logging, usage + latency capture, and optional fallback.
+ * gateway. It now consults the DB-backed ROUTING ENGINE to decide which BIINA
+ * model / provider serves each request, then executes that route via the
+ * gateway's provider router:
  *
- *   route (/api/ai/chat) → aiService → @biina/ai-gateway → provider (Ollama | vLLM | …)
+ *   route (/api/ai/chat) → aiService → routing engine (DB) → @biina/ai-gateway → provider
  *
- * The provider is invisible above this layer; switching Ollama ↔ vLLM is config.
+ * Provider connection secrets stay in ENV; the routing DB holds only non-secret
+ * operational config. The provider remains invisible to the UI.
  */
 
-// Generous outer safety-net bound; each provider enforces its own precise timeout.
 const DEFAULT_TIMEOUT_MS = 130_000;
-
 function outerTimeoutMs(): number {
   const raw = process.env.AI_REQUEST_TIMEOUT_MS;
   const n = raw ? Number(raw) + 10_000 : DEFAULT_TIMEOUT_MS;
@@ -31,65 +32,51 @@ function outerTimeoutMs(): number {
 }
 
 export interface EffectiveMeta {
-  /** Provider that actually produced the reply (may differ from primary if fallback ran). */
-  provider: string;
-  /** Logical model id that actually produced the reply. */
-  model: string;
+  provider: string; // provider TYPE (e.g. "openai-compatible")
+  model: string; // BIINA logical slug (e.g. "biina-general-v1")
+  providerModel: string; // vendor model (admin/debug only)
+  reason: string;
+  fallbackUsed: boolean;
 }
 
 export interface AssistantStream {
   requestId: string;
-  /** Primary provider/model (what headers advertise). */
-  provider: string;
-  model: string;
-  /** Updated in place to the provider/model that actually served the reply. */
   meta: EffectiveMeta;
   stream: AsyncIterable<ChatChunk>;
 }
 
 export interface StartReplyParams {
   messages: ChatMessage[];
-  model?: string;
+  routeContext: RouteContext;
   signal?: AbortSignal;
-  /** Correlation/logging context (never logs message contents). */
   conversationId?: string;
-  userId?: string;
-  /** Persona/feature context for the server-composed system prompt. */
   promptContext?: SystemPromptContext;
 }
 
-/** One gateway stream + its lifecycle (timeout timer, cleanup). */
 interface OpenStream {
   stream: AsyncIterable<ChatChunk>;
-  provider: string;
-  model: string;
   dispose: () => void;
 }
 
 export function startAssistantReply(params: StartReplyParams): AssistantStream {
   const requestId = randomUUID();
-
-  // Server-composed system prompt (never persisted / returned to the UI).
+  const meta: EffectiveMeta = { provider: '', model: '', providerModel: '', reason: '', fallbackUsed: false };
   const messages = withSystemPrompt(params.messages, params.promptContext);
 
-  // Open a gateway stream for a given logical model, wiring cancellation + an
-  // outer timeout. Calling this does NOT hit the network — the provider generator
-  // runs lazily on first iteration.
-  const open = (modelId?: string): OpenStream => {
+  const openRoute = (decision: RouteDecision): OpenStream => {
     const controller = new AbortController();
     const onAbort = () => controller.abort();
     params.signal?.addEventListener('abort', onAbort, { once: true });
     const timer = setTimeout(() => controller.abort(), outerTimeoutMs());
-    const { stream, provider, model } = streamChat({
-      model: modelId,
+    const { stream } = streamChatRoute({
+      providerType: decision.providerType,
+      providerModel: decision.providerModel,
       messages,
       requestId,
       signal: controller.signal,
     });
     return {
       stream,
-      provider,
-      model,
       dispose: () => {
         clearTimeout(timer);
         params.signal?.removeEventListener('abort', onAbort);
@@ -97,21 +84,17 @@ export function startAssistantReply(params: StartReplyParams): AssistantStream {
     };
   };
 
-  const primary = open(params.model);
-  const meta: EffectiveMeta = { provider: primary.provider, model: primary.model };
-
-  const startedAt = Date.now();
-  recordRequest();
-  logger.info('ai.chat.start', {
-    requestId,
-    provider: primary.provider,
-    model: primary.model,
-    conversationId: params.conversationId,
-    userId: params.userId,
-    messages: params.messages.length,
-  });
+  const setMeta = (d: RouteDecision) => {
+    meta.provider = d.providerType;
+    meta.model = d.biinaModelSlug;
+    meta.providerModel = d.providerModel;
+    meta.reason = d.reason;
+    meta.fallbackUsed = d.fallbackUsed;
+  };
 
   async function* wrapped(): AsyncIterable<ChatChunk> {
+    recordRequest();
+    const startedAt = Date.now();
     let outChars = 0;
     let yielded = false;
     let firstTokenAt: number | undefined;
@@ -131,32 +114,70 @@ export function startAssistantReply(params: StartReplyParams): AssistantStream {
       }
     };
 
+    // Resolve the route (DB snapshot). Routing errors surface here → the route
+    // handler maps them to a clean status (never a broken 200 stream).
+    const snap = await loadAiConfig();
+    let decision: RouteDecision;
+    try {
+      decision = selectRoute(params.routeContext, snap);
+    } catch (err) {
+      const ge = toGatewayError(err, 'routing');
+      lastErrorCode = ge.code;
+      status = 'error';
+      logger.error('ai.routing.error', { requestId, code: ge.code, error: ge.message });
+      recordResult({ status, latencyMs: Date.now() - startedAt, errorCode: ge.code, isoTime: new Date().toISOString() });
+      throw ge;
+    }
+
+    // Proactive health-based fallback: if the primary provider is known-unhealthy
+    // and fallback is enabled, switch before spending a failed call.
+    if (snap.settings.fallbackEnabled && decision.provider.healthState === 'error') {
+      const fb = selectFallback(snap, decision, params.routeContext);
+      if (fb) {
+        logger.warn('ai.routing.failover', { requestId, from: decision.providerType, to: fb.providerType, reason: 'primary_unhealthy' });
+        decision = fb;
+      }
+    }
+
+    setMeta(decision);
+    logger.info('ai.routing.decision', {
+      requestId,
+      conversationId: params.conversationId,
+      userId: params.routeContext.userId,
+      biinaModel: decision.biinaModelSlug,
+      provider: decision.providerType,
+      providerModel: decision.providerModel,
+      persona: params.routeContext.persona ?? undefined,
+      workload: params.routeContext.workload ?? undefined,
+      plan: params.routeContext.userPlan,
+      routingReason: decision.reason,
+      fallbackUsed: decision.fallbackUsed,
+    });
+
+    let primary = openRoute(decision);
     try {
       try {
         yield* consume(primary);
       } catch (err) {
-        const ge = toGatewayError(err, primary.provider);
-        // Fallback only BEFORE any token streamed and never on cancellation.
+        const ge = toGatewayError(err, decision.providerType);
         if (!yielded && ge.code !== 'cancelled') {
-          const plan = resolveFallbackPlan(primary.provider);
-          if (plan) {
-            logger.warn('ai.chat.failover', {
-              requestId,
-              from: primary.provider,
-              to: plan.provider,
-              reason: ge.code,
-            });
-            const fb = open(plan.model);
-            meta.provider = fb.provider;
-            meta.model = fb.model;
+          const fb = selectFallback(snap, decision, params.routeContext);
+          if (fb) {
+            logger.warn('ai.routing.failover', { requestId, from: decision.providerType, to: fb.providerType, reason: ge.code });
+            setMeta(fb);
+            primary.dispose();
+            const fbStream = openRoute(fb);
             try {
-              yield* consume(fb);
+              yield* consume(fbStream);
               status = 'failover_success';
               return;
             } catch (fbErr) {
-              throw toGatewayError(fbErr, fb.provider);
+              const fbe = toGatewayError(fbErr, fb.providerType);
+              lastErrorCode = fbe.code;
+              status = 'error';
+              throw fbe;
             } finally {
-              fb.dispose();
+              fbStream.dispose();
             }
           }
         }
@@ -176,20 +197,15 @@ export function startAssistantReply(params: StartReplyParams): AssistantStream {
       primary.dispose();
       const latencyMs = Date.now() - startedAt;
       const ttftMs = firstTokenAt ? firstTokenAt - startedAt : undefined;
-      recordResult({
-        status,
-        latencyMs,
-        ttftMs,
-        errorCode: lastErrorCode,
-        isoTime: new Date().toISOString(),
-      });
+      recordResult({ status, latencyMs, ttftMs, errorCode: lastErrorCode, isoTime: new Date().toISOString() });
       logger.info('ai.chat.done', {
         requestId,
         provider: meta.provider,
         model: meta.model,
         conversationId: params.conversationId,
-        userId: params.userId,
+        userId: params.routeContext.userId,
         status,
+        fallbackUsed: meta.fallbackUsed,
         ttftMs,
         latencyMs,
         outChars,
@@ -201,7 +217,7 @@ export function startAssistantReply(params: StartReplyParams): AssistantStream {
     }
   }
 
-  return { requestId, provider: primary.provider, model: primary.model, meta, stream: wrapped() };
+  return { requestId, meta, stream: wrapped() };
 }
 
 /** Consume a stream fully into a single string (non-streaming callers). */

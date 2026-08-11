@@ -225,8 +225,15 @@ usage metrics, admin AI diagnostics (`/api/ai/health`).
 
 **Added (Phase 3):** real **OpenAI-compatible provider** (vLLM/RunPod-ready) with
 SSE streaming, per-provider timeouts, conservative connect retries, cancellation,
-full error normalization, latency (TTFT) metrics, optional admin-configured
-fallback (off by default), in-memory admin metrics, and vLLM/RunPod deployment
-docs. Local Ollama ↔ cloud vLLM is a **config-only** switch.
+full error normalization, latency (TTFT) metrics, and vLLM/RunPod deployment docs.
+Local Ollama ↔ cloud vLLM is a **config-only** switch.
 
-**Deferred:** usage metering & plans (Phase 4). See [`docs/ROADMAP.md`](./docs/ROADMAP.md).
+**Added (Phase 4):** DB-backed **model routing + admin control plane**. A model
+catalog + provider registry (secrets stay in ENV), a routing engine
+(default/persona/workload/plan priority, capability gating, DB fallback), an
+**Admin → AI Control** page (`/api/admin/ai/*`) to manage models/providers/routing,
+a user model selector (BIINA names only), routing/audit logging, and a `plan`
+column for future tiers. See [`docs/MODEL_ROUTING.md`](./docs/MODEL_ROUTING.md) and
+[`docs/AI_CONTROL_PLANE.md`](./docs/AI_CONTROL_PLANE.md).
+
+**Deferred:** usage metering, plans & cost controls (Phase 5). See [`docs/ROADMAP.md`](./docs/ROADMAP.md).

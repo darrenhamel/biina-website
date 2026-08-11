@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { sql } from 'drizzle-orm';
 import { isLocale, type Locale } from '@/i18n/config';
@@ -63,6 +64,22 @@ export default async function AdminPage({ params }: { params: { locale: string }
             </div>
           ))}
         </div>
+
+        <Link
+          href={`/${locale}/app/admin/ai`}
+          className="card mt-4 flex items-center justify-between p-5 transition-colors hover:border-accent"
+        >
+          <span className="flex items-center gap-3">
+            <span className="grid h-10 w-10 place-items-center rounded-xl bg-accent-soft text-accent">
+              <Icon name="spark" />
+            </span>
+            <span>
+              <span className="block font-semibold text-ink">{dict.admin.aiControl}</span>
+              <span className="block text-sm text-ink-soft">{dict.admin.aiControlSub}</span>
+            </span>
+          </span>
+          <Icon name="send" width={18} height={18} />
+        </Link>
       </div>
     </div>
   );

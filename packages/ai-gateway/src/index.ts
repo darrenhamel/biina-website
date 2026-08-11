@@ -19,8 +19,34 @@ export { MockProvider } from './providers/mock';
 export { OllamaProvider } from './providers/ollama';
 export { OpenAICompatibleProvider } from './providers/openai-compatible';
 
-import type { ChatChunk, ChatMessage, ProviderHealth } from './types';
+import type { ChatChunk, ChatMessage, ProviderHealth, ProviderName } from './types';
 import { getProvider, getProviderForModel, resolveModel } from './registry';
+
+/**
+ * Route-driven streaming: the BIINA routing engine (app layer, DB-backed) has
+ * already decided the provider type + vendor model. This just executes the
+ * route via the provider router. Provider CONNECTION config (base URL / key)
+ * still comes from server env — secrets never live in the routing DB.
+ */
+export function streamChatRoute(params: {
+  providerType: ProviderName;
+  providerModel: string;
+  messages: ChatMessage[];
+  requestId: string;
+  temperature?: number;
+  signal?: AbortSignal;
+}): { stream: AsyncIterable<ChatChunk>; provider: string } {
+  const provider = getProvider(params.providerType);
+  const stream = provider.chat({
+    model: params.providerModel,
+    messages: params.messages,
+    requestId: params.requestId,
+    temperature: params.temperature,
+    signal: params.signal,
+    stream: true,
+  });
+  return { stream, provider: provider.name };
+}
 
 /**
  * High-level convenience the AI service uses: resolve the provider for a logical

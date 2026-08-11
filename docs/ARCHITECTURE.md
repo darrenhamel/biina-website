@@ -179,10 +179,41 @@ paid provider unintentionally.
 The app now connects to a **configurable** remote URL, so provider endpoints come
 **only** from trusted server env (`OPENAI_COMPATIBLE_BASE_URL`), never from user
 input. A user's chat request carries message text and an optional **logical**
-model id that is matched against the registry — it can never become a URL or a
-vendor model name (`resolveModel` maps to a server-defined descriptor; unknown
-ids fall back to the provider default). The provider also rejects non-`http(s)`
-base URLs. Operators should point the base URL only at trusted endpoints.
+model id that is matched against the registry/catalog — it can never become a URL
+or a vendor model name. The provider also rejects non-`http(s)` base URLs.
+Operators should point the base URL only at trusted endpoints.
+
+## 4a. Model routing & admin control plane (Phase 4)
+
+Provider/model selection is now **DB-backed and admin-controllable**, while the
+gateway remains the provider abstraction and **secrets remain in ENV**.
+
+```
+/api/ai/chat → AI service → Routing Engine (pure fn over cached DB snapshot)
+                                   │  RouteDecision { providerType, providerModel, biinaModel, reason }
+                                   ▼
+                            @biina/ai-gateway Provider Router → provider (connection from ENV)
+```
+
+Four separated concepts: **provider** (`ai_providers`), **underlying model**
+(`ai_models.provider_model_id`), **logical BIINA model** (`ai_models.slug`), and
+**consumer display name** (`ai_models.display_name`). Consumers only ever see the
+display name.
+
+- **Routing engine** (`server/ai/routing.ts`) is a **pure function** over a cached
+  config snapshot (`server/ai/catalog.ts`), so it is fully unit-tested without a
+  DB. Priority: explicit approved override → persona → workload → plan → default.
+  Capabilities gate routes; invalid config fails clearly (surfaced to admins).
+- **Env vs. DB rule**: secrets (API keys, base URLs) live in ENV; operational
+  config (enabled, priority, default, persona/workload routes, fallback,
+  user-facing names, capabilities, visibility, maintenance) lives in the DB.
+  Provider rows store only env-var **reference names** — never values.
+- **Admin control plane**: `Admin → AI Control` + `/api/admin/ai/*` (ADMIN-gated,
+  Zod-validated, audited, cache-invalidating). Fallback is DB-configured (opt-in,
+  never silent, loop-protected). Plans/personas/sovereign fields are present for
+  readiness; no billing/region enforcement yet.
+
+Details: [`MODEL_ROUTING.md`](./MODEL_ROUTING.md) · [`AI_CONTROL_PLANE.md`](./AI_CONTROL_PLANE.md).
 
 ### System prompt (server-side, layered)
 

@@ -43,15 +43,25 @@ Legend: ☐ not started · ◐ in progress · ☑ done
   with Ollama offline; mock path verified end-to-end.
 - **Deliverable:** real streamed requests through the gateway; Ollama-ready. No deploy.
 
-## Phase 4 — Data model, users, usage metering  ☐  *(build prompt 5)*
+## Phase 4 — Model routing + admin control plane  ☑  *(control-plane track)*
 
-- ☐ Full schema: profiles, providers, models, usage_events, plans, usage_limits.
-- ☐ Migrations + seed/dev data.
-- ☐ Metering/entitlement service; gateway checks entitlement before calling a provider.
-- ☐ Plans: Free / Pro / Admin, configurable daily/monthly limits. No payments.
-- ☐ Tests; update architecture docs.
+- ☑ DB-backed catalog: `ai_providers`, `ai_models`, `ai_routes`, `ai_settings`,
+  `ai_audit_log` (secrets stay in ENV; provider rows hold env-ref names only).
+- ☑ Pure routing engine (default/persona/workload/plan priority, capability gating,
+  fail-safe validation) + cached config loader; DB-configured fallback (opt-in,
+  loop-protected). Gateway `streamChatRoute` executes the route.
+- ☑ Admin control plane: `Admin → AI Control` + `/api/admin/ai/*` (ADMIN-gated,
+  Zod-validated, audited, cache-invalidating). User model selector (BIINA names).
+- ☑ Routing/audit logging; `plan` column + plan/persona/sovereign readiness fields.
+- ☑ Migration `0001` + seed catalog; routing unit tests + live authz/mutation checks.
 
-## Phase 5 — Cheap production deploy prep  ☐  *(build prompt 6)*
+## Phase 5 — Usage metering, plans & cost controls  ☐  *(build prompt 5 — metering track)*
+
+- ☐ `usage_events` + entitlement/metering service; check entitlement before a provider call.
+- ☐ Plan limits (Free / Pro / …), configurable daily/monthly caps. No payments.
+- ☐ Persist usage from the gateway's usage metadata; admin usage views. Tests + docs.
+
+## Phase 7 — Cheap production deploy prep  ☐  *(build prompt 6)*
 
 - ☐ Production Dockerfile(s), `docker-compose.production.yml`, reverse proxy config.
 - ☐ Health checks, restart policies, persistent DB volume, env template.
@@ -59,7 +69,7 @@ Legend: ☐ not started · ◐ in progress · ☑ done
 - ☐ Security hardening (headers, secure cookies, rate limiting, CORS, DB not exposed).
 - ☐ `docs/PRODUCTION_DEPLOYMENT.md` + full deployment checklist. **No deploy.**
 
-## Phase 6 — Production AI inference (OpenAI-compatible vLLM / RunPod)  ☑  *(build prompt 7)*
+## Phase 8 — Production AI inference (OpenAI-compatible vLLM / RunPod)  ☑  *(build prompt 7)*
 
 - ☑ Real `OpenAICompatibleProvider` (SSE `/v1/chat/completions`), wired via config only.
 - ☑ Connection test + provider health check + configured-model verification (admin).
@@ -71,7 +81,7 @@ Legend: ☐ not started · ◐ in progress · ☑ done
   persistence, usage). ◐ Real RunPod endpoint pending user-supplied credentials.
 - **Deliverable:** cloud-inference-ready; local Ollama ↔ cloud vLLM is a config switch. No deploy.
 
-## Phase 7 — Pre-launch audit  ☐  *(build prompt 8)*
+## Phase 9 — Pre-launch audit  ☐  *(build prompt 8)*
 
 - ☐ Audit all 24 areas; run typecheck / lint / tests / prod build / migration validation / dep-security.
 - ☐ Categorize findings (BLOCKER / HIGH / MEDIUM / LOW); fix BLOCKER + HIGH locally.

@@ -37,6 +37,9 @@ export function ChatWorkspace({
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastUserRef = useRef<string>('');
+  // User-facing model selector (BIINA names only; infra hidden).
+  const [models, setModels] = useState<Array<{ slug: string; displayName: string }>>([]);
+  const [model, setModel] = useState<string>('');
 
   // Keep state in sync when navigating between conversations.
   useEffect(() => {
@@ -44,6 +47,20 @@ export function ChatWorkspace({
     convIdRef.current = initialConversationId;
     setError(null);
   }, [initialConversationId, initialMessages]);
+
+  // Load the models this user may pick (only shown if there's a real choice).
+  useEffect(() => {
+    let active = true;
+    fetch('/api/ai/models')
+      .then((r) => (r.ok ? r.json() : { models: [] }))
+      .then((d) => {
+        if (active) setModels(d.models ?? []);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -69,7 +86,7 @@ export function ChatWorkspace({
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversationId: convIdRef.current, message: content }),
+        body: JSON.stringify({ conversationId: convIdRef.current, message: content, model: model || undefined }),
         signal: controller.signal,
       });
 
@@ -157,6 +174,9 @@ export function ChatWorkspace({
         onStop={stop}
         onRegenerate={regenerate}
         canRegenerate={!isEmpty && !busy}
+        models={models}
+        model={model}
+        setModel={setModel}
       />
     </div>
   );
@@ -259,6 +279,9 @@ function Composer({
   onStop,
   onRegenerate,
   canRegenerate,
+  models,
+  model,
+  setModel,
 }: {
   dict: Dictionary;
   input: string;
@@ -268,6 +291,9 @@ function Composer({
   onStop: () => void;
   onRegenerate: () => void;
   canRegenerate: boolean;
+  models: Array<{ slug: string; displayName: string }>;
+  model: string;
+  setModel: (v: string) => void;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -288,6 +314,26 @@ function Composer({
   return (
     <div className="shrink-0 border-t border-line bg-paper px-4 py-3 md:px-6">
       <div className="mx-auto max-w-3xl">
+        {models.length > 1 && (
+          <div className="mb-2 flex justify-center">
+            <label className="inline-flex items-center gap-1.5 text-xs text-ink-soft">
+              <span className="sr-only">Model</span>
+              <select
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                className="rounded-lg border border-line bg-paper-raised px-2 py-1 text-xs text-ink focus:border-accent focus:outline-none"
+                aria-label="Model"
+              >
+                <option value="">{dict.chat.assistant}</option>
+                {models.map((m) => (
+                  <option key={m.slug} value={m.slug}>
+                    {m.displayName}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
         {canRegenerate && (
           <div className="mb-2 flex justify-center">
             <button onClick={onRegenerate} className="btn-outline px-3 py-1.5 text-xs">
