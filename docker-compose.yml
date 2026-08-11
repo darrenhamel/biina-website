@@ -1,0 +1,41 @@
+# Local development services for BIINA.ai.
+#   docker compose up -d            # Postgres only
+#   docker compose --profile ai up -d   # Postgres + Ollama (Phase 3)
+#
+# This file is for LOCAL DEVELOPMENT. Production compose lands in Phase 5
+# (docker-compose.production.yml). No secrets belong here.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: biina-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: biina
+      POSTGRES_PASSWORD: biina
+      POSTGRES_DB: biina
+    ports:
+      - '5432:5432'
+    volumes:
+      - biina_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U biina -d biina']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Optional local model runtime. Enabled in Phase 3 with the "ai" profile.
+  # We do NOT auto-pull models here — see docs/ROADMAP.md Phase 3.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: biina-ollama
+    restart: unless-stopped
+    profiles: ['ai']
+    ports:
+      - '11434:11434'
+    volumes:
+      - biina_ollama:/root/.ollama
+
+volumes:
+  biina_pgdata:
+  biina_ollama:

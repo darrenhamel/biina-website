@@ -1,0 +1,129 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ==========================================================================
+   BIINA.ai product theme tokens.
+   Colours are raw "R G B" triplets so Tailwind's <alpha-value> works.
+   Light theme by default; a [data-theme="dark"] block layers a dark theme.
+   ========================================================================== */
+:root {
+  --c-ink: 12 27 51; /* #0C1B33 deep navy ink */
+  --c-ink-soft: 71 82 107; /* secondary text */
+  --c-ink-faint: 128 138 158; /* tertiary / captions */
+
+  --c-paper: 250 249 247; /* warm off-white page */
+  --c-paper-raised: 255 255 255; /* cards / surfaces */
+  --c-paper-sunken: 243 242 238; /* insets / chat bg */
+
+  --c-line: 228 226 220; /* hairlines */
+  --c-line-strong: 209 206 198;
+
+  /* Signature accent — deep teal, deliberately NOT generic SaaS blue. */
+  --c-accent: 13 124 111; /* #0D7C6F */
+  --c-accent-strong: 10 99 89;
+  --c-accent-soft: 224 242 239;
+  --c-on-accent: 255 255 255;
+
+  /* Dark app shell (sidebar / rails) sits on navy. */
+  --c-shell: 10 24 43; /* #0A182B */
+  --c-shell-raised: 17 34 58;
+  --c-on-shell: 235 239 246;
+  --c-on-shell-soft: 156 170 193;
+
+  --c-gold: 198 154 75; /* rare premium highlight */
+  --c-danger: 190 47 47;
+  --c-success: 21 128 61;
+
+  --font-sans: 'Manrope';
+  --font-arabic: 'IBM Plex Sans Arabic';
+}
+
+[data-theme='dark'] {
+  --c-ink: 235 239 246;
+  --c-ink-soft: 176 187 206;
+  --c-ink-faint: 128 141 165;
+  --c-paper: 8 18 33;
+  --c-paper-raised: 16 30 51;
+  --c-paper-sunken: 12 24 43;
+  --c-line: 34 50 74;
+  --c-line-strong: 48 66 94;
+  --c-accent: 34 176 158;
+  --c-accent-strong: 22 150 134;
+  --c-accent-soft: 18 44 44;
+  --c-on-accent: 4 20 18;
+  --c-shell: 6 14 26;
+  --c-shell-raised: 14 28 48;
+  --c-on-shell: 235 239 246;
+  --c-on-shell-soft: 156 170 193;
+}
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+  body {
+    @apply bg-paper text-ink antialiased;
+    font-family: var(--font-sans), system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    min-height: 100dvh;
+  }
+  /* Arabic / RTL uses the Arabic face. */
+  [dir='rtl'] body,
+  [lang='ar'] {
+    font-family: var(--font-arabic), var(--font-sans), system-ui, sans-serif;
+  }
+  * {
+    border-color: rgb(var(--c-line));
+  }
+  :focus-visible {
+    outline: 2px solid rgb(var(--c-accent));
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.001ms !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply btn bg-accent text-on-accent hover:bg-accent-strong;
+  }
+  .btn-ghost {
+    @apply btn bg-transparent text-ink hover:bg-paper-sunken;
+  }
+  .btn-outline {
+    @apply btn border border-line-strong bg-paper-raised text-ink hover:bg-paper-sunken;
+  }
+  .field {
+    @apply w-full rounded-xl border border-line-strong bg-paper-raised px-3.5 py-2.5 text-sm text-ink placeholder:text-ink-faint focus:border-accent focus:outline-none;
+  }
+  .card {
+    @apply rounded-2xl border border-line bg-paper-raised;
+  }
+  .prose-chat {
+    @apply whitespace-pre-wrap break-words leading-relaxed;
+  }
+}
+
+/* Thin, unobtrusive scrollbars in the app shell. */
+.scroll-slim {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--c-line-strong)) transparent;
+}
+.scroll-slim::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.scroll-slim::-webkit-scrollbar-thumb {
+  background-color: rgb(var(--c-line-strong));
+  border-radius: 8px;
+}

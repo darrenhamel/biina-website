@@ -1,23 +1,26 @@
 {
-  "name": "biina-website",
-  "type": "module",
+  "name": "biina",
   "version": "0.1.0",
   "private": true,
+  "description": "BIINA.ai monorepo — marketing site (Astro) + product app (Next.js) + AI gateway",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "astro dev",
-    "start": "astro dev",
-    "build": "astro build",
-    "preview": "astro preview",
-    "astro": "astro"
+    "dev": "npm run dev -w apps/web",
+    "dev:marketing": "npm run dev -w apps/marketing",
+    "build": "npm run build -w apps/web",
+    "build:marketing": "npm run build -w apps/marketing",
+    "lint": "npm run lint -w apps/web",
+    "typecheck": "npm run typecheck -w apps/web",
+    "test": "npm run test -w apps/web",
+    "db:generate": "npm run db:generate -w apps/web",
+    "db:migrate": "npm run db:migrate -w apps/web",
+    "db:push": "npm run db:push -w apps/web",
+    "db:seed": "npm run db:seed -w apps/web"
   },
-  "dependencies": {
-    "@astrojs/sitemap": "^3.2.1",
-    "@fontsource/ibm-plex-sans-arabic": "^5.1.0",
-    "@fontsource/manrope": "^5.1.0",
-    "astro": "^4.16.18"
-  },
-  "devDependencies": {
-    "playwright-core": "^1.49.0",
-    "sharp": "^0.35.3"
+  "engines": {
+    "node": ">=20"
   }
 }

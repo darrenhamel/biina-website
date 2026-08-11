@@ -1,0 +1,213 @@
+import type { Locale } from './config';
+
+/**
+ * Translation dictionaries. English is the source of truth for the shape; the
+ * Arabic dictionary must satisfy the same `Dictionary` type, so a missing key is
+ * a TYPE ERROR, not a runtime surprise. A unit test also asserts key parity.
+ *
+ * User-facing strings are NEVER hard-coded in components — they come from here.
+ */
+
+const en = {
+  common: {
+    appName: 'BIINA',
+    tagline: 'An Arabic-first AI platform',
+    signIn: 'Sign in',
+    signUp: 'Sign up',
+    signOut: 'Sign out',
+    email: 'Email',
+    password: 'Password',
+    displayName: 'Name',
+    cancel: 'Cancel',
+    save: 'Save',
+    delete: 'Delete',
+    rename: 'Rename',
+    copy: 'Copy',
+    copied: 'Copied',
+    loading: 'Loading…',
+    comingSoon: 'Coming soon',
+    retry: 'Try again',
+    somethingWrong: 'Something went wrong.',
+  },
+  nav: {
+    chat: 'Chat',
+    discover: 'Discover',
+    search: 'Search',
+    templates: 'Templates',
+    projects: 'Projects',
+    agents: 'Agents',
+    files: 'Files',
+    settings: 'Settings',
+    account: 'Account',
+    admin: 'Admin',
+  },
+  landing: {
+    heroTitle: 'The AI platform, built Arabic-first.',
+    heroSubtitle:
+      'BIINA is a product layer over many AI models — so your experience never depends on a single vendor. English and Arabic from day one.',
+    ctaPrimary: 'Get started',
+    ctaSecondary: 'Sign in',
+    devNotice: 'In development',
+    f1Title: 'Not tied to one model',
+    f1Body: 'Models are infrastructure. BIINA routes to the right one behind a single, stable interface.',
+    f2Title: 'Arabic-first & bilingual',
+    f2Body: 'Full right-to-left layouts and English + Arabic throughout, not an afterthought.',
+    f3Title: 'Private by design',
+    f3Body: 'Your keys and data stay server-side. The browser never talks to a model vendor directly.',
+  },
+  auth: {
+    signupTitle: 'Create your BIINA account',
+    signupSubtitle: 'Start a conversation in seconds.',
+    loginTitle: 'Welcome back',
+    loginSubtitle: 'Sign in to continue.',
+    haveAccount: 'Already have an account?',
+    noAccount: 'New to BIINA?',
+    createAccount: 'Create account',
+    passwordHint: 'At least 8 characters.',
+    invalidCredentials: 'Incorrect email or password.',
+    emailTaken: 'An account with that email already exists.',
+  },
+  chat: {
+    newChat: 'New chat',
+    conversations: 'Conversations',
+    emptyTitle: 'How can BIINA help today?',
+    emptySubtitle: 'Ask a question, draft something, or explore an idea.',
+    inputPlaceholder: 'Message BIINA…',
+    send: 'Send',
+    stop: 'Stop',
+    regenerate: 'Regenerate',
+    you: 'You',
+    assistant: 'BIINA',
+    noConversations: 'No conversations yet.',
+    deleteConfirm: 'Delete this conversation? This cannot be undone.',
+    thinking: 'BIINA is thinking…',
+    devProviderNote: 'Development response — real AI models connect in Phase 2.',
+  },
+  settings: {
+    title: 'Settings',
+    language: 'Language',
+    languageHelp: 'Choose the interface language and direction.',
+    persona: 'Experience',
+    personaHelp: 'Persona-tailored experiences are coming; the default experience is active.',
+    profile: 'Profile',
+    theme: 'Theme',
+  },
+  account: {
+    title: 'Account',
+    role: 'Role',
+    memberSince: 'Member since',
+    email: 'Email',
+  },
+  admin: {
+    title: 'Admin',
+    subtitle: 'Basic administration. Full tools arrive in a later phase.',
+    usersHeading: 'Overview',
+    restricted: 'You need administrator access to view this area.',
+  },
+};
+
+export type Dictionary = typeof en;
+
+const ar: Dictionary = {
+  common: {
+    appName: 'BIINA',
+    tagline: 'منصّة ذكاء اصطناعي تبدأ من العربية',
+    signIn: 'تسجيل الدخول',
+    signUp: 'إنشاء حساب',
+    signOut: 'تسجيل الخروج',
+    email: 'البريد الإلكتروني',
+    password: 'كلمة المرور',
+    displayName: 'الاسم',
+    cancel: 'إلغاء',
+    save: 'حفظ',
+    delete: 'حذف',
+    rename: 'إعادة تسمية',
+    copy: 'نسخ',
+    copied: 'تم النسخ',
+    loading: 'جارٍ التحميل…',
+    comingSoon: 'قريبًا',
+    retry: 'إعادة المحاولة',
+    somethingWrong: 'حدث خطأ ما.',
+  },
+  nav: {
+    chat: 'المحادثة',
+    discover: 'استكشاف',
+    search: 'بحث',
+    templates: 'القوالب',
+    projects: 'المشاريع',
+    agents: 'الوكلاء',
+    files: 'الملفات',
+    settings: 'الإعدادات',
+    account: 'الحساب',
+    admin: 'الإدارة',
+  },
+  landing: {
+    heroTitle: 'منصّة الذكاء الاصطناعي، مبنيّة على العربية أولًا.',
+    heroSubtitle:
+      'BIINA طبقة منتج فوق نماذج ذكاء اصطناعي متعدّدة — فلا تعتمد تجربتك على مزوّد واحد. الإنجليزية والعربية منذ اليوم الأول.',
+    ctaPrimary: 'ابدأ الآن',
+    ctaSecondary: 'تسجيل الدخول',
+    devNotice: 'قيد التطوير',
+    f1Title: 'غير مرتبطة بنموذج واحد',
+    f1Body: 'النماذج بنية تحتية. توجّه BIINA طلبك إلى النموذج المناسب خلف واجهة واحدة ثابتة.',
+    f2Title: 'العربية أولًا وثنائية اللغة',
+    f2Body: 'تخطيطات كاملة من اليمين إلى اليسار، والإنجليزية والعربية في كل مكان، لا كإضافة لاحقة.',
+    f3Title: 'الخصوصية بالتصميم',
+    f3Body: 'مفاتيحك وبياناتك تبقى على الخادم. المتصفّح لا يتواصل مع مزوّد النموذج مباشرة.',
+  },
+  auth: {
+    signupTitle: 'أنشئ حساب BIINA',
+    signupSubtitle: 'ابدأ محادثة خلال ثوانٍ.',
+    loginTitle: 'مرحبًا بعودتك',
+    loginSubtitle: 'سجّل الدخول للمتابعة.',
+    haveAccount: 'لديك حساب بالفعل؟',
+    noAccount: 'جديد على BIINA؟',
+    createAccount: 'إنشاء حساب',
+    passwordHint: '٨ أحرف على الأقل.',
+    invalidCredentials: 'البريد الإلكتروني أو كلمة المرور غير صحيحة.',
+    emailTaken: 'يوجد حساب بهذا البريد الإلكتروني بالفعل.',
+  },
+  chat: {
+    newChat: 'محادثة جديدة',
+    conversations: 'المحادثات',
+    emptyTitle: 'كيف يمكن لـ BIINA مساعدتك اليوم؟',
+    emptySubtitle: 'اطرح سؤالًا، أو اكتب شيئًا، أو استكشف فكرة.',
+    inputPlaceholder: 'راسل BIINA…',
+    send: 'إرسال',
+    stop: 'إيقاف',
+    regenerate: 'إعادة التوليد',
+    you: 'أنت',
+    assistant: 'BIINA',
+    noConversations: 'لا توجد محادثات بعد.',
+    deleteConfirm: 'حذف هذه المحادثة؟ لا يمكن التراجع عن ذلك.',
+    thinking: 'BIINA تفكّر…',
+    devProviderNote: 'ردّ تطويري — تتّصل نماذج الذكاء الاصطناعي الحقيقية في المرحلة الثانية.',
+  },
+  settings: {
+    title: 'الإعدادات',
+    language: 'اللغة',
+    languageHelp: 'اختر لغة الواجهة واتجاهها.',
+    persona: 'التجربة',
+    personaHelp: 'تجارب مخصّصة حسب الشخصية قادمة؛ التجربة الافتراضية مفعّلة الآن.',
+    profile: 'الملف الشخصي',
+    theme: 'المظهر',
+  },
+  account: {
+    title: 'الحساب',
+    role: 'الدور',
+    memberSince: 'عضو منذ',
+    email: 'البريد الإلكتروني',
+  },
+  admin: {
+    title: 'الإدارة',
+    subtitle: 'إدارة أساسية. تصل الأدوات الكاملة في مرحلة لاحقة.',
+    usersHeading: 'نظرة عامة',
+    restricted: 'تحتاج إلى صلاحية مسؤول لعرض هذه المنطقة.',
+  },
+};
+
+const dictionaries: Record<Locale, Dictionary> = { en, ar };
+
+export function getDictionary(locale: Locale): Dictionary {
+  return dictionaries[locale] ?? dictionaries.en;
+}
