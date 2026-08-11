@@ -1,0 +1,227 @@
+# BIINA.ai — Architecture
+
+> Status: **Planning / Phase 0** (this document is the target architecture, not
+> yet fully built). The only thing that currently exists in the repository is
+> the static marketing site (see [Current state](#0-current-state)).
+>
+> Naming note: the build prompts spell the product **"Banaii.ai"**. We treat that
+> as a spelling variant and brand everything **BIINA.ai**, matching the existing
+> marketing site and the `biina-website` repository. If that decision is ever
+> reversed, it is a find-and-replace, not an architectural change.
+
+---
+
+## 0. Current state
+
+The repository today is a **single static marketing site**:
+
+- **Astro 4** + TypeScript, output is plain static HTML (`dist/`).
+- Bilingual **English + Arabic**, Arabic is **RTL-first** (not a mirror).
+- Self-hosted fonts (Manrope + IBM Plex Sans Arabic); **zero third-party requests**.
+- Contact form via **Formspree** — no backend, no database.
+- Brand tokens live in `src/styles/global.css` (deep navy `#0A1F3D` + one blue accent).
+- Copy is data-driven in `src/data/*.ts` and `src/i18n/ui.ts`, EN and AR side by side.
+
+This site is a **credibility site**, deliberately conservative in its claims. It
+is finished and deployable. **We keep it.** It is not the product.
+
+## 1. What we are building
+
+BIINA.ai the **product** is a full-stack, multi-tenant AI chat application. The
+guiding principle:
+
+> **BIINA.ai is the product. Individual LLMs are infrastructure underneath it.**
+
+The application must never be coupled to one model or one vendor. Everything the
+user sees is "BIINA" — the frontend must not know or care which model produced a
+response. That decoupling is enforced by the **BIINA AI Gateway** (§4).
+
+## 2. Repository shape — monorepo (npm workspaces)
+
+We convert the repo into an **npm-workspaces monorepo**. Nothing is deleted; the
+existing site moves into `apps/marketing/`.
+
+```
+biina-website/                     # workspace root
+├── apps/
+│   ├── marketing/                 # ← existing Astro static site (moved here as-is)
+│   │                              #   deploys to biina.ai (root domain)
+│   └── web/                       # ← NEW: Next.js full-stack product app
+│                                  #   deploys to app.biina.ai
+├── packages/
+│   └── ai-gateway/                # framework-agnostic TS: provider abstraction,
+│                                  #   model registry, streaming, usage metering.
+│                                  #   Imported by apps/web server-side only.
+├── docs/                          # ARCHITECTURE / ROADMAP / DEPLOYMENT / ...
+├── package.json                   # workspace root: { "workspaces": ["apps/*","packages/*"] }
+└── CLAUDE.md
+```
+
+Why a monorepo (vs. two repos or one merged app):
+
+- The marketing site and the app have **different runtimes** (static vs. Node
+  server) and **different deploy targets** — they should not share a build.
+- The AI Gateway is genuinely **shared, framework-agnostic logic**. Putting it in
+  `packages/ai-gateway` keeps it testable in isolation and reusable if a separate
+  backend service is ever split out.
+- One repo, one place to reason about brand tokens, i18n conventions, and docs.
+
+Rule of thumb going forward: **static/marketing → `apps/marketing`; anything with
+auth, a database, or an AI call → `apps/web` (UI) or `packages/ai-gateway` (logic).**
+
+## 3. `apps/web` — the product application
+
+Recommended stack (chosen for: TypeScript end-to-end, server-side secrets by
+default, low cost, Docker-friendly, single deployable unit for the MVP):
+
+| Concern | Choice | Why |
+|---|---|---|
+| Framework | **Next.js (App Router) + TypeScript** | One deployable for UI + API; Server Components keep AI/DB calls server-side by default. |
+| Styling | **Tailwind CSS** + CSS variables reusing the existing brand tokens | Fast, consistent, RTL-friendly with logical properties. |
+| Database | **PostgreSQL** | Relational, ubiquitous, cheap, strong Docker story. |
+| ORM | **Prisma** | First-class TS types, migrations, good DX. |
+| Auth | **Auth.js (NextAuth v5)** — credentials + session, server-side | Server-side sessions, secure http-only cookies, no keys in browser. |
+| i18n | **next-intl** (or equivalent), EN + AR, RTL | Message catalogs mirror the marketing site's EN/AR discipline. |
+| Validation | **Zod** on every API boundary | One schema = runtime validation + TS types. |
+
+### Layering (strict, one direction)
+
+```
+  Browser (React client components — NEVER hold provider keys)
+      │  fetch() → same-origin
+      ▼
+  apps/web  Route Handlers  /api/*        ← auth, Zod validation, rate limit
+      │
+      ▼
+  Services (apps/web/src/server/*)         ← entitlement/metering, conversation store
+      │
+      ▼
+  packages/ai-gateway                      ← provider abstraction, model registry
+      │
+      ▼
+  Provider adapters:  Ollama │ OpenAI-compatible (vLLM/RunPod) │ (later: OpenAI, Anthropic, Gemini)
+```
+
+The browser only ever talks to **`/api/*` on the same origin**. Provider base
+URLs and API keys exist **only** in server environment variables.
+
+## 4. The BIINA AI Gateway (`packages/ai-gateway`)
+
+The heart of the architecture. A small, framework-agnostic TypeScript package.
+
+**Provider interface (shape, not final code):**
+
+```ts
+interface ChatRequest {
+  model: string;                 // logical model id from the registry, NOT a vendor default
+  messages: ChatMessage[];
+  stream?: boolean;
+  temperature?: number;
+  requestId: string;             // correlation id, generated per request
+  signal?: AbortSignal;          // enforces timeouts / cancellation
+}
+
+interface ChatChunk { delta: string; done: boolean; usage?: UsageMeta; }
+
+interface AIProvider {
+  readonly name: 'ollama' | 'openai-compatible' | string;
+  chat(req: ChatRequest): AsyncIterable<ChatChunk>;   // streaming-first
+  health(): Promise<ProviderHealth>;
+}
+```
+
+**Standardized, provider-agnostic response** — the frontend sees one shape
+regardless of vendor: streamed text deltas plus, when available, `{ model,
+provider, inputTokens, outputTokens, totalTokens, latencyMs, requestId, status }`.
+
+**Providers shipped in the MVP:**
+1. **`OllamaProvider`** — local development (`OLLAMA_BASE_URL`, `OLLAMA_MODEL`).
+2. **`OpenAICompatibleProvider`** — production via any OpenAI-compatible endpoint
+   (vLLM on RunPod, etc.): `OPENAI_COMPATIBLE_BASE_URL/_API_KEY/_MODEL`.
+
+**Later, without any frontend change:** `OpenAIProvider`, `AnthropicProvider`,
+`GeminiProvider` — each is a new adapter implementing `AIProvider`, registered in
+the model registry. See [Adding a provider](#8-adding-a-provider-later).
+
+**Cross-cutting concerns handled in the gateway (not in the UI):**
+streaming, timeouts, provider error normalization, graceful failure, request &
+conversation IDs, token/usage metadata, structured server-side logging.
+**API keys are never logged.**
+
+### Centralized model registry
+
+There is **one** place that maps logical model ids → provider + vendor model
+name + limits. Model names are **never hard-coded** across the app. `AI_DEFAULT_PROVIDER`
+and `AI_DEFAULT_MODEL` pick the default; everything else reads the registry.
+
+### The single entry point
+
+```
+POST /api/ai/chat      # the ONLY way the UI talks to AI. Provider is invisible to it.
+GET  /api/ai/health    # per-provider health for diagnostics
+GET  /api/health       # app + database liveness (no secrets in the response)
+```
+
+## 5. Data model (target — built in Phase 5)
+
+Vendor-independent by design: usage is recorded against **logical** provider/model
+records, so switching vendors never rewrites history.
+
+- `users`, `profiles` — identity and preferences (locale, etc.).
+- `conversations`, `messages` — chat persistence (role, content, timestamps).
+- `providers`, `models` — the registry, persisted.
+- `usage_events` — one row per AI request: `userId, conversationId, provider,
+  model, requestId, inputTokens, outputTokens, totalTokens, latencyMs, status, createdAt`.
+- `plans` (Free / Pro / Admin), `usage_limits` — configurable daily/monthly caps.
+
+**Never stored:** hidden model reasoning. **Never exposed via API:** internal
+system prompts.
+
+### Entitlement / metering
+
+A small service checks the user's plan and usage **before** the gateway calls a
+provider; it records a `usage_event` after. Over-limit requests are refused with a
+clear, localized error. No payments in the MVP.
+
+## 6. Security posture (applies from day one)
+
+- Provider credentials **server-side only**; never shipped to the browser, never logged.
+- No secrets in git. All config via env vars; `.env.example` documents every key.
+- Secure, http-only, `SameSite` cookies; HTTPS-only in production.
+- Zod validation on every request body; rate limiting on auth and `/api/ai/*`.
+- Sensible security headers + CORS; the database is never publicly exposed.
+- Health endpoints reveal **status only**, never secret values.
+
+## 7. Internationalization & RTL
+
+The app is bilingual from the start (EN default, AR full RTL), reusing the
+marketing site's discipline: message catalogs with EN and AR side by side, the
+`dir` attribute driven by locale, and CSS **logical properties** (`margin-inline`,
+`padding-inline`, `inset-inline`) so RTL is correct, not mirrored. Brand tokens
+are shared with `apps/marketing`.
+
+## 8. Adding a provider later
+
+1. Create `packages/ai-gateway/src/providers/<name>.ts` implementing `AIProvider`.
+2. Register it and its models in the **model registry** with the env vars it needs.
+3. Add its keys to `.env.example`.
+4. Point `AI_DEFAULT_PROVIDER` / `AI_DEFAULT_MODEL` at it if it should be default.
+
+**No frontend, route-handler, or database change is required.** That is the whole
+point of the gateway. Switching local Ollama → production vLLM is *config only*.
+
+## 9. Deployment topology (target — see DEPLOYMENT.md / PRODUCTION_DEPLOYMENT.md)
+
+```
+Internet → Cloudflare (DNS/TLS)
+   ├── biina.ai            → apps/marketing  (static host or VPS)
+   └── app.biina.ai        → small Linux VPS
+                                └── Docker: [ Next.js app ]──[ PostgreSQL (private volume) ]
+                                                   │
+                                                   └── HTTPS → external OpenAI-compatible
+                                                               vLLM endpoint (e.g. RunPod)
+```
+
+The GPU/inference server is **decoupled** from the VPS and reached over HTTPS. The
+app scales horizontally later (stateless app containers behind the proxy, Postgres
+as the shared state) without re-architecting.
