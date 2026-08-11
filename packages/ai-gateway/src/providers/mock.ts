@@ -42,6 +42,10 @@ export class MockProvider implements AIProvider {
   async health(): Promise<ProviderHealth> {
     return { provider: this.name, ok: true, detail: 'mock provider always available' };
   }
+
+  async discoverModels(): Promise<string[]> {
+    return ['biina-dev'];
+  }
 }
 
 function buildMockReply(prompt: string): string {

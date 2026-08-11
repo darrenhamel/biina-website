@@ -29,23 +29,19 @@ Legend: ☐ not started · ◐ in progress · ☑ done
 - ☐ Lint, typecheck, tests, `dev`/`build` all green.
 - **Deliverable:** end-to-end chat flow working against a stub/echo provider. No deploy.
 
-## Phase 2 — BIINA AI Gateway  ☐  *(build prompt 3)*
+## Phase 2 — BIINA AI Gateway + local Ollama  ☑  *(build prompts 3 & 4)*
 
-- ☐ `packages/ai-gateway`: `AIProvider` interface, model registry, standardized response.
-- ☐ `OllamaProvider` + `OpenAICompatibleProvider`.
-- ☐ Streaming, timeouts, error normalization, graceful failure, request/conversation IDs,
-  usage metadata, structured logging (never log keys).
-- ☐ `POST /api/ai/chat` (the only AI entry point) + `GET /api/ai/health`.
-- ☐ Gateway unit tests (mocked providers). Docs: "adding a provider".
-- **Deliverable:** a real streamed request through the gateway. No deploy.
-
-## Phase 3 — Local Ollama path  ☐  *(build prompt 4)*
-
-- ☐ Detect Ollama; if absent, hand the user the official install step (don't auto-install).
-- ☐ Pick a small dev chat model; make it configurable.
-- ☐ Full path test: browser → web → gateway → Ollama → streamed response.
-- ☐ Diagnostics page/endpoint: App / DB / Gateway / Ollama status + selected provider/model (no secrets).
-- ☐ E2E prompt check: "Reply with exactly: Banaii AI gateway operational".
+- ☑ `packages/ai-gateway`: `AIProvider` interface, env-driven model registry, standardized response.
+- ☑ `OllamaProvider` (implemented) + `OpenAICompatibleProvider` (Phase-3 readiness stub).
+- ☑ Streaming, per-request timeouts, `GatewayError` normalization, graceful failure,
+  request/conversation IDs, usage metadata, structured logging (never log keys/secrets).
+- ☑ `POST /api/ai/chat` (the only AI entry point) + admin `GET /api/ai/health` diagnostics.
+- ☑ Server-side system-prompt composition (persona-ready); model discovery helper.
+- ☑ Gateway + provider + service unit tests (mocked fetch — no Ollama needed). Docs: "adding a provider".
+- ◐ **Live** browser→Ollama→model e2e is code-complete but pending a local Ollama
+  install on the dev machine (we don't auto-install). Verified graceful behavior
+  with Ollama offline; mock path verified end-to-end.
+- **Deliverable:** real streamed requests through the gateway; Ollama-ready. No deploy.
 
 ## Phase 4 — Data model, users, usage metering  ☐  *(build prompt 5)*
 

@@ -21,6 +21,8 @@ export interface UsageMeta {
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  /** Provider-reported generation duration in ms, when available. */
+  generationMs?: number;
 }
 
 /** A single streamed chunk from a provider. */
@@ -65,17 +67,32 @@ export interface AIProvider {
   readonly name: ProviderName;
   chat(req: ChatRequest): AsyncIterable<ChatChunk>;
   health(): Promise<ProviderHealth>;
+  /**
+   * Optional development/diagnostics helper: list the model names the provider
+   * currently has available. Used by the admin diagnostics endpoint to verify
+   * the configured model exists. Not all providers can enumerate models.
+   */
+  discoverModels?(): Promise<string[]>;
+}
+
+/** What a model can do. Lets the registry advertise capabilities to callers. */
+export interface ModelCapabilities {
+  chat: boolean;
+  streaming: boolean;
 }
 
 /** A logical model entry in the central registry. */
 export interface ModelDescriptor {
   /** Stable logical id used throughout the app, e.g. "biina-dev". */
   id: string;
-  /** Human label shown in UI. */
+  /** Human label shown in UI (never the raw vendor name for consumer surfaces). */
   label: string;
   provider: ProviderName;
-  /** The provider's own model name (e.g. an Ollama tag). Filled in Phase 2+. */
+  /** The provider's own model name (e.g. an Ollama tag). */
   providerModel?: string;
   /** Advertised context window, when known. */
   contextTokens?: number;
+  /** Whether this entry is selectable/usable. Disabled entries are ignored. */
+  enabled?: boolean;
+  capabilities?: ModelCapabilities;
 }

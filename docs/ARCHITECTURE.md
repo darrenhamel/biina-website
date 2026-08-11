@@ -134,19 +134,39 @@ interface AIProvider {
 regardless of vendor: streamed text deltas plus, when available, `{ model,
 provider, inputTokens, outputTokens, totalTokens, latencyMs, requestId, status }`.
 
-**Providers shipped in the MVP:**
-1. **`OllamaProvider`** — local development (`OLLAMA_BASE_URL`, `OLLAMA_MODEL`).
-2. **`OpenAICompatibleProvider`** — production via any OpenAI-compatible endpoint
-   (vLLM on RunPod, etc.): `OPENAI_COMPATIBLE_BASE_URL/_API_KEY/_MODEL`.
+**Providers:**
+1. **`MockProvider`** — zero-config development stub (`AI_DEFAULT_PROVIDER=mock`).
+2. **`OllamaProvider`** ✅ *(Phase 2, implemented)* — local models over Ollama's
+   HTTP API (`OLLAMA_BASE_URL`, `OLLAMA_MODEL`, `OLLAMA_REQUEST_TIMEOUT_MS`). Parses
+   Ollama's NDJSON stream into the provider-agnostic `ChatChunk` contract; normalizes
+   usage (`prompt_eval_count`/`eval_count`/`total_duration`) and errors.
+3. **`OpenAICompatibleProvider`** — Phase-3 **readiness stub**. Structured and in the
+   router now (`OPENAI_COMPATIBLE_BASE_URL/_API_KEY/_MODEL`) but not active; calling it
+   fails clearly rather than silently using a paid endpoint.
 
 **Later, without any frontend change:** `OpenAIProvider`, `AnthropicProvider`,
-`GeminiProvider` — each is a new adapter implementing `AIProvider`, registered in
-the model registry. See [Adding a provider](#8-adding-a-provider-later).
+`GeminiProvider`, DeepSeek, Qwen — each a new adapter implementing `AIProvider`,
+registered in the model registry. See [Adding a provider](#8-adding-a-provider-later).
 
-**Cross-cutting concerns handled in the gateway (not in the UI):**
-streaming, timeouts, provider error normalization, graceful failure, request &
-conversation IDs, token/usage metadata, structured server-side logging.
+**Error taxonomy:** providers throw `GatewayError` with a stable `code`
+(`provider_unavailable` · `model_unavailable` · `timeout` · `cancelled` ·
+`invalid_config` · `bad_response`). The app maps the code to a safe user message
+and HTTP status; technical detail is logged server-side only.
+
+**Cross-cutting concerns handled in the gateway/service (not in the UI):**
+streaming, per-request timeouts, provider error normalization, graceful failure,
+request & conversation IDs, token/usage metadata, structured server-side logging.
+The route pulls the first chunk before responding, so connection/model/config
+failures return a proper status instead of a broken `200` stream.
 **API keys are never logged.**
+
+### System prompt (server-side, layered)
+
+Assembled entirely on the server (`apps/web/src/server/ai/system-prompt.ts`),
+never sent to the browser or persisted as a visible message:
+`Global BIINA policy + Persona instructions + Feature/context + Conversation`.
+Any `system` messages in stored history are dropped before the provider call so
+the server-composed policy is authoritative and internal prompts never leak.
 
 ### Centralized model registry
 

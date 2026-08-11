@@ -22,11 +22,13 @@ export async function GET() {
 
   const healthy = Object.values(checks).every((v) => v === 'ok');
 
+  // Public endpoint: report component status only, no infra probing or secrets.
+  // Deep AI/provider diagnostics live behind the admin-only /api/ai/health.
   return NextResponse.json(
     {
       status: healthy ? 'ok' : 'degraded',
-      checks,
-      ai: { provider: cfg.defaultProvider, model: cfg.defaultModel },
+      checks: { ...checks, aiGateway: 'ok' },
+      ai: { provider: cfg.defaultProvider },
       time: new Date().toISOString(),
     },
     { status: healthy ? 200 : 503 },

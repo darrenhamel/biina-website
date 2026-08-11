@@ -1,5 +1,5 @@
-import { NextRequest } from 'next/server';
-import type { ChatMessage } from '@biina/ai-gateway';
+import { NextRequest, NextResponse } from 'next/server';
+import { toGatewayError, type ChatMessage, type ChatChunk } from '@biina/ai-gateway';
 import { getCurrentUser } from '@/server/auth/session';
 import {
   addMessage,
@@ -19,10 +19,12 @@ import { logger } from '@/lib/logger';
  *   1. authenticates + validates,
  *   2. persists the user message (creating a conversation if needed),
  *   3. asks the AI service (→ gateway → provider) for a streamed reply,
- *   4. streams plain-text deltas to the client,
- *   5. persists the finished assistant message with provider/model metadata.
+ *   4. pulls the first chunk so provider errors return a clean status BEFORE the
+ *      stream starts (once bytes flow, the status is already 200),
+ *   5. streams plain-text deltas to the client,
+ *   6. persists the finished assistant message with provider/model metadata.
  *
- * Provider selection is invisible to the client. Phase 1 = mock provider.
+ * Provider selection is invisible to the client.
  */
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -44,38 +46,59 @@ export async function POST(req: NextRequest) {
       const created = await createConversation(user.id, title || 'New conversation', model);
       convId = created.id;
     }
+    const finalConvId = convId;
 
     // Persist the user's message, then build the full history for the provider.
-    await addMessage({ conversationId: convId, role: 'user', content: message });
-    const history = await listMessages(convId);
-    const chatMessages: ChatMessage[] = history.map((m) => ({
-      role: m.role,
-      content: m.content,
-    }));
+    await addMessage({ conversationId: finalConvId, role: 'user', content: message });
+    const history = await listMessages(finalConvId);
+    const chatMessages: ChatMessage[] = history.map((m) => ({ role: m.role, content: m.content }));
 
     const { requestId, provider, model: resolvedModel, stream } = startAssistantReply({
       messages: chatMessages,
       model,
       signal: req.signal,
+      conversationId: finalConvId,
+      userId: user.id,
+      promptContext: { personaId: user.personaId, locale: user.locale },
     });
 
+    // Pull the first chunk up front: connection / model / config errors surface
+    // here (before any bytes) so we can return a proper status + safe message.
+    const iterator = stream[Symbol.asyncIterator]();
+    let first: IteratorResult<ChatChunk>;
+    try {
+      first = await iterator.next();
+    } catch (err) {
+      const ge = toGatewayError(err, provider);
+      if (ge.code === 'cancelled') return new NextResponse(null, { status: 499 });
+      return NextResponse.json(
+        { error: ge.userMessage(), code: ge.code, requestId },
+        { status: ge.httpStatus() },
+      );
+    }
+
     const encoder = new TextEncoder();
-    const finalConvId = convId;
 
     const body = new ReadableStream<Uint8Array>({
       async start(controller) {
         let assistantText = '';
+        const push = (chunk?: ChatChunk) => {
+          if (chunk?.delta) {
+            assistantText += chunk.delta;
+            controller.enqueue(encoder.encode(chunk.delta));
+          }
+        };
         try {
-          for await (const chunk of stream) {
-            if (chunk.delta) {
-              assistantText += chunk.delta;
-              controller.enqueue(encoder.encode(chunk.delta));
-            }
+          if (!first.done) push(first.value);
+          while (!first.done) {
+            const next = await iterator.next();
+            if (next.done) break;
+            push(next.value);
           }
         } catch (err) {
-          logger.error('ai.chat.stream_error', { requestId, error: String(err) });
+          // Mid-stream failure (status already 200). Logged in the service too.
+          logger.warn('ai.chat.stream_interrupted', { requestId, error: String(err) });
         } finally {
-          // Persist whatever was generated (best-effort), even on early stop.
           if (assistantText.trim().length > 0) {
             try {
               await addMessage({
@@ -91,6 +114,10 @@ export async function POST(req: NextRequest) {
           }
           controller.close();
         }
+      },
+      cancel() {
+        // Client disconnected / stop pressed — propagate cancellation to the provider.
+        void iterator.return?.(undefined);
       },
     });
 

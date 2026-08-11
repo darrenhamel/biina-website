@@ -1,8 +1,24 @@
-import { describe, it, expect, beforeAll } from 'vitest';
-import { getProviderForModel, listModels, resolveModel, streamChat } from '@biina/ai-gateway';
+import { describe, it, expect, beforeAll, afterEach } from 'vitest';
+import {
+  getProvider,
+  getProviderForModel,
+  listModels,
+  resolveModel,
+  streamChat,
+  isGatewayError,
+  OllamaProvider,
+  OpenAICompatibleProvider,
+  __resetProviderCache,
+} from '@biina/ai-gateway';
 
 beforeAll(() => {
   process.env.MOCK_STREAM_DELAY_MS = '0';
+  process.env.AI_DEFAULT_PROVIDER = 'mock';
+  delete process.env.AI_DEFAULT_MODEL;
+});
+
+afterEach(() => {
+  __resetProviderCache();
 });
 
 async function collect(stream: AsyncIterable<{ delta: string; done: boolean }>) {
@@ -16,19 +32,60 @@ async function collect(stream: AsyncIterable<{ delta: string; done: boolean }>) 
 }
 
 describe('model registry', () => {
-  it('exposes at least one model and resolves the default', () => {
-    expect(listModels().length).toBeGreaterThan(0);
-    expect(resolveModel().id).toBe('biina-dev');
+  it('exposes mock and ollama models and resolves the default', () => {
+    const ids = listModels().map((m) => m.id);
+    expect(ids).toContain('biina-dev'); // mock
+    expect(ids).toContain('biina-local'); // ollama
+    expect(resolveModel().id).toBe('biina-dev'); // default provider = mock
   });
 
-  it('resolves the mock provider for the default model', () => {
-    const { provider, model } = getProviderForModel();
-    expect(provider.name).toBe('mock');
-    expect(model.provider).toBe('mock');
+  it('advertises capabilities per model', () => {
+    const local = listModels().find((m) => m.id === 'biina-local')!;
+    expect(local.provider).toBe('ollama');
+    expect(local.capabilities).toEqual({ chat: true, streaming: true });
+  });
+
+  it('reads the Ollama vendor model from OLLAMA_MODEL', () => {
+    process.env.OLLAMA_MODEL = 'qwen2.5:1.5b';
+    const local = listModels().find((m) => m.id === 'biina-local')!;
+    expect(local.providerModel).toBe('qwen2.5:1.5b');
+    delete process.env.OLLAMA_MODEL;
+  });
+
+  it('resolves the ollama provider for the local model', () => {
+    const { provider, model } = getProviderForModel('biina-local');
+    expect(provider.name).toBe('ollama');
+    expect(provider).toBeInstanceOf(OllamaProvider);
+    expect(model.provider).toBe('ollama');
   });
 });
 
-describe('mock provider streaming', () => {
+describe('provider router', () => {
+  it('returns the right provider instance by name', () => {
+    expect(getProvider('mock').name).toBe('mock');
+    expect(getProvider('ollama')).toBeInstanceOf(OllamaProvider);
+    expect(getProvider('openai-compatible')).toBeInstanceOf(OpenAICompatibleProvider);
+  });
+
+  it('throws a clear GatewayError for an unknown provider', () => {
+    try {
+      getProvider('nope-vendor');
+      throw new Error('should have thrown');
+    } catch (err) {
+      expect(isGatewayError(err)).toBe(true);
+      if (isGatewayError(err)) expect(err.code).toBe('invalid_config');
+    }
+  });
+
+  it('openai-compatible is a Phase-3 stub that fails clearly (no silent paid fallback)', async () => {
+    const provider = getProvider('openai-compatible');
+    await expect(async () => {
+      for await (const _ of provider.chat({ model: 'x', messages: [], requestId: 'r' })) void _;
+    }).rejects.toMatchObject({ code: 'invalid_config' });
+  });
+});
+
+describe('mock provider streaming (provider-agnostic contract)', () => {
   it('streams a non-empty reply and terminates with done', async () => {
     const { stream } = streamChat({
       messages: [{ role: 'user', content: 'Hello BIINA' }],
@@ -62,16 +119,16 @@ describe('mock provider streaming', () => {
     });
     controller.abort();
     const { text } = await collect(stream);
-    // Aborted before/at first tick — should not produce the full reply.
     expect(text.length).toBeLessThan(50);
   });
 });
 
 describe('provider health', () => {
-  it('mock provider is healthy', async () => {
+  it('mock provider is healthy and can enumerate models', async () => {
     const { provider } = getProviderForModel();
     const health = await provider.health();
     expect(health.ok).toBe(true);
     expect(health.provider).toBe('mock');
+    expect(await provider.discoverModels?.()).toContain('biina-dev');
   });
 });

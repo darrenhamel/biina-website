@@ -8,7 +8,10 @@
 
 type Level = 'debug' | 'info' | 'warn' | 'error';
 
-const REDACT_KEYS = /pass(word)?|secret|token|api[-_]?key|authorization|cookie/i;
+// Redact auth/secret-bearing keys. Deliberately does NOT match usage token
+// COUNTS (inputTokens/outputTokens/totalTokens) — those are metrics, not secrets.
+const REDACT_KEYS =
+  /pass(word)?|secret|api[-_]?key|apikey|authorization|access[-_]?token|refresh[-_]?token|session[-_]?token|bearer|cookie|credential/i;
 
 function redact(meta: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
