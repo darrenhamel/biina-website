@@ -94,6 +94,8 @@ export function ChatWorkspace({
   const [searching, setSearching] = useState(false);
   // Connected external sources selected for grounding.
   const [connectionIds, setConnectionIds] = useState<string[]>([]);
+  // Temporary chat: no memory retrieval + no memory creation (server honors this).
+  const [temporary, setTemporary] = useState(false);
 
   // Keep state in sync when navigating between conversations.
   useEffect(() => {
@@ -151,6 +153,7 @@ export function ChatWorkspace({
           ...(useRag ? { knowledgeBaseIds, ragMode } : {}),
           ...(webSearch ? { webSearch: true, freshness } : {}),
           ...(connectionIds.length > 0 ? { connectionIds } : {}),
+          ...(temporary ? { temporary: true } : {}),
         }),
         signal: controller.signal,
       });
@@ -275,6 +278,8 @@ export function ChatWorkspace({
         setFreshness={setFreshness}
         connectionIds={connectionIds}
         setConnectionIds={setConnectionIds}
+        temporary={temporary}
+        setTemporary={setTemporary}
       />
     </div>
   );
@@ -514,6 +519,8 @@ function Composer({
   setFreshness,
   connectionIds,
   setConnectionIds,
+  temporary,
+  setTemporary,
 }: {
   dict: Dictionary;
   input: string;
@@ -536,6 +543,8 @@ function Composer({
   setFreshness: (v: Freshness) => void;
   connectionIds: string[];
   setConnectionIds: (ids: string[]) => void;
+  temporary: boolean;
+  setTemporary: (v: boolean) => void;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -623,6 +632,16 @@ function Composer({
               </select>
             </label>
           )}
+          <button
+            type="button"
+            onClick={() => setTemporary(!temporary)}
+            aria-pressed={temporary}
+            title={dict.chat.temporaryHint}
+            className={`gap-1.5 px-3 py-1.5 text-xs ${temporary ? 'btn-primary' : 'btn-outline'}`}
+          >
+            <Icon name="clock" width={14} height={14} />
+            <span className="truncate">{temporary ? dict.chat.temporaryOn : dict.chat.temporary}</span>
+          </button>
         </div>
         <div className="flex items-end gap-2 rounded-2xl border border-line-strong bg-paper-raised p-2 focus-within:border-accent">
           <textarea

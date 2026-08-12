@@ -556,6 +556,67 @@ Details: [`WORKFLOWS.md`](./WORKFLOWS.md) · [`SCHEDULER.md`](./SCHEDULER.md) ·
 [`WORKFLOW_TEMPLATES.md`](./WORKFLOW_TEMPLATES.md) ·
 [`WORKFLOW_COSTS.md`](./WORKFLOW_COSTS.md).
 
+## 4j. Memory, personalization & the context engine (Phase 13)
+
+Gives BIINA.ai a durable, consent-gated **memory** and a **ContextEngine** that
+assembles it — the ONE place memory + personalization become model context. Memory
+is a **distinct data category** from conversation history, knowledge bases, profile
+settings, and live data; it is selected (not "everything the user said"), scoped,
+revocable, and **never authority**. It reuses the Phase 8 **RAG embedding provider +
+cosine** — no second vector store. Code: `apps/web/src/server/memory/`.
+
+```
+Chat turn → ContextEngine.assembleContext (memory OFF / temporary ⇒ skip)
+   → retrieveMemories (authz + status + expiry in SQL WHERE) → rank → budget
+   → system-prompt layers (personalization, REMEMBERED CONTEXT)
+   → AI Gateway   (memory is background context — never overrides the request,
+                   never authorizes an action)
+Post-response → maybeExtractCandidates (user's OWN message only; ASK/AUTO)
+```
+
+- **Six distinct sources, memory is one.** Conversation history ≠ knowledge (RAG)
+  ≠ memory ≠ profile settings ≠ org context ≠ live data. Not all conversation is
+  memorized; nothing is auto-saved unless AUTO mode + low-risk.
+- **Precedence + budget (`context-engine.ts`).** platform safety > org policy >
+  CURRENT REQUEST > workflow/agent objective > explicit profile settings > durable
+  memory > history > RAG > connected > web. Budgeted to **≤ 6 items / ≤ 600
+  tokens / min relevance**; trimming reduces low-priority retrieved context, never
+  policy or the request.
+- **Explicit vs. inferred.** Explicit "remember/forget" is deterministic,
+  synchronous, full-confidence (chat short-circuits with
+  `X-Biina-Answer-Mode: MEMORY_COMMAND`). Inferred candidates come from **the
+  user's own message only** (poisoning boundary), via a pluggable extractor with a
+  **deterministic offline fallback** here; `ASK` asks, `AUTO` auto-accepts only
+  `NORMAL` low-risk. Contradictions **supersede** (newer wins); dedup at cosine
+  `≥ 0.95`.
+- **Consent + privacy.** Consent lives on the **profile** (`memoryEnabled`,
+  `memoryMode` OFF/ASK/AUTO), not env-only. Memory off ⇒ no retrieval + no new
+  inferred memory; temporary chat ⇒ no durable memory used or created;
+  expired/deleted excluded from retrieval **immediately**. View/edit/delete/
+  clear/search + candidate review APIs; clear-all is memory only (not account/
+  conversations/files/KBs).
+- **Security.** Secrets/credentials + injected instructions blocked from all memory
+  paths; system prompts never stored; sensitive/restricted need explicit consent;
+  personal **XOR** org domains (`resolveMemoryAccess`, IDOR-safe → null → 404);
+  memory ≠ StandingAuthorization (never authorizes an action) and can't reconfigure
+  a workflow. Metadata-only audit (`memory.*`), no content in logs.
+- **Additive schema + plan columns.** `memories`, `memory_revisions`,
+  `memory_candidates`, `memory_usage`, `conversation_summaries`; profile gained
+  `responseStyle`/`tone`/`memoryEnabled`/`memoryMode`; plan gained `memoryEnabled`,
+  `maxMemories`, `autoMemoryEnabled`, `organizationMemoryEnabled`,
+  `memoryRetentionDays`. Flags `MEMORY_ENABLED`, `MEMORY_INFERENCE_ENABLED`,
+  `MEMORY_AUTO_SAVE_ENABLED`, `ORGANIZATION_MEMORY_ENABLED` (also plan- + consent-
+  gated). APIs: `memory` (+`[id]`, `clear`, `settings`, `candidates` +`[id]`),
+  `admin/memory` (health, no content).
+- **Readiness only.** Model-backed inferred extraction (offline fallback ships),
+  memory consolidation, conversation summarization, full export UI, and background
+  expiration cleanup (`markExpiredMemories` exists; no cron wired).
+
+Details: [`MEMORY_ARCHITECTURE.md`](./MEMORY_ARCHITECTURE.md) ·
+[`CONTEXT_ENGINE.md`](./CONTEXT_ENGINE.md) · [`PERSONALIZATION.md`](./PERSONALIZATION.md) ·
+[`MEMORY_PRIVACY.md`](./MEMORY_PRIVACY.md) · [`ORGANIZATION_MEMORY.md`](./ORGANIZATION_MEMORY.md) ·
+[`MEMORY_SECURITY.md`](./MEMORY_SECURITY.md).
+
 ### System prompt (server-side, layered)
 
 Assembled entirely on the server (`apps/web/src/server/ai/system-prompt.ts`),

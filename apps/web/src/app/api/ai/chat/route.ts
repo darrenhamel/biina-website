@@ -20,6 +20,8 @@ import { retrievalConfig } from '@/server/rag/config';
 import { groundWithWeb } from '@/server/web/service';
 import type { WebCitation } from '@/server/web/grounding';
 import { searchConnectedSources, type ConnectorCitation } from '@/server/connectors/connected-search';
+import { assembleContext } from '@/server/memory/context-engine';
+import { handleExplicitMemory, maybeExtractCandidates } from '@/server/memory/commands';
 import { isWorkload } from '@/config/ai-routing';
 import { chatRequestSchema } from '@/lib/validation';
 import { WORKSPACE_COOKIE } from '@/server/org/constants';
@@ -43,7 +45,7 @@ export async function POST(req: NextRequest) {
     const user = await getCurrentUser();
     if (!user) return unauthorized();
 
-    const { conversationId, message, model, workload, knowledgeBaseIds, ragMode, webSearch, freshness, connectionIds } = chatRequestSchema.parse(await req.json());
+    const { conversationId, message, model, workload, knowledgeBaseIds, ragMode, webSearch, freshness, connectionIds, temporary } = chatRequestSchema.parse(await req.json());
 
     // Resolve the active workspace from a cookie and VERIFY membership server-side
     // (never trust a browser-supplied org id). A suspended org blocks new AI usage.
@@ -87,7 +89,19 @@ export async function POST(req: NextRequest) {
     const mode: RagMode = ragMode === 'strict' ? 'strict' : 'blended';
     const wantRag = Boolean(knowledgeBaseIds && knowledgeBaseIds.length > 0 && ragMode !== 'off');
     const wantConnected = Boolean(connectionIds && connectionIds.length > 0);
-    const plan = wantRag || webSearch || wantConnected ? await getPlan(user.plan) : null;
+    // Plan is always resolved now (memory gating needs it); it's cached.
+    const plan = await getPlan(user.plan);
+
+    // Phase 13 — explicit "remember/forget" commands are handled reliably + up front
+    // (personal scope only). They short-circuit with a confirmation reply.
+    const explicit = await handleExplicitMemory({ message, userId: user.id, organizationId: orgId, conversationId: finalConvId, plan, temporary: Boolean(temporary) });
+    if (explicit.handled && explicit.reply) {
+      if (!temporary) await addMessage({ conversationId: finalConvId, role: 'assistant', content: explicit.reply });
+      return new Response(explicit.reply, {
+        status: 200,
+        headers: { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store, no-transform', 'X-Biina-Conversation-Id': finalConvId, 'X-Biina-Answer-Mode': 'MEMORY_COMMAND' },
+      });
+    }
 
     if (wantRag && plan?.ragEnabled) {
       const { results } = await retrieveKnowledge({
@@ -152,6 +166,19 @@ export async function POST(req: NextRequest) {
     }
     const citations = [...ragCitations, ...webCitations, ...connectorCitations];
 
+    // Phase 13 — the ContextEngine assembles durable memory + explicit personalization
+    // (skipped entirely for temporary chat or when memory is off). Memory is background
+    // context: it never overrides the current request and never authorizes actions.
+    let memoryPrompt: SystemPromptContext['memory'];
+    let personalizationPrompt: string | undefined;
+    try {
+      const assembled = await assembleContext({ userId: user.id, organizationId: orgId, persona: user.personaId, query: message, temporary: Boolean(temporary) });
+      personalizationPrompt = assembled.personalization; // explicit setting; available to all
+      memoryPrompt = plan.memoryEnabled ? assembled.memory : undefined; // durable memory is plan-gated
+    } catch (err) {
+      logger.warn('ai.chat.context_engine_failed', { error: String(err) });
+    }
+
     // Build a validated routing context. Privileged fields (plan, isAdmin, org)
     // come from the authenticated session / verified membership, NOT the body.
     const routeContext: RouteContext = {
@@ -170,7 +197,7 @@ export async function POST(req: NextRequest) {
       routeContext,
       signal: req.signal,
       conversationId: finalConvId,
-      promptContext: { personaId: user.personaId, locale: user.locale, rag: ragPrompt, web: webPrompt, connected: connectedPrompt },
+      promptContext: { personaId: user.personaId, locale: user.locale, rag: ragPrompt, web: webPrompt, connected: connectedPrompt, personalization: personalizationPrompt, memory: memoryPrompt },
     });
 
     // Internal answer mode (helps citations/metering/UI). CONNECTED wins the label
@@ -235,6 +262,9 @@ export async function POST(req: NextRequest) {
               logger.error('ai.chat.persist_error', { requestId, error: String(err) });
             }
           }
+          // Phase 13 — best-effort inferred-memory extraction AFTER the response, from
+          // the user's OWN message only (never tool/web content). ASK/AUTO mode only.
+          void maybeExtractCandidates({ message, userId: user.id, organizationId: orgId, conversationId: finalConvId, plan, temporary: Boolean(temporary) });
           controller.close();
         }
       },

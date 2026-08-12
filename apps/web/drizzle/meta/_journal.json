@@ -78,6 +78,13 @@
       "when": 1786559085706,
       "tag": "0010_workflows",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1786561005657,
+      "tag": "0011_memory",
+      "breakpoints": true
     }
   ]
 }

@@ -62,6 +62,11 @@ const FALLBACK_FREE: Plan = {
   workflowRunsPerMonth: null,
   maxWorkflowSteps: null,
   scheduledWritesEnabled: false,
+  memoryEnabled: false,
+  maxMemories: null,
+  autoMemoryEnabled: false,
+  organizationMemoryEnabled: false,
+  memoryRetentionDays: null,
   priorityClass: 100,
   updatedAt: new Date(0),
 };

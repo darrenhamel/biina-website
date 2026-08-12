@@ -373,11 +373,26 @@ async function seedPlans(db: DB) {
       .where(eq(plans.slug, slug));
   }
 
+  // Phase 13 — memory & personalization entitlements per tier. FREE = manual-only.
+  const mem: Record<string, { on: boolean; max: number | null; auto: boolean; org: boolean; retention: number | null }> = {
+    FREE: { on: true, max: 20, auto: false, org: false, retention: null },
+    PRO: { on: true, max: 200, auto: true, org: false, retention: null },
+    BUSINESS: { on: true, max: 1000, auto: true, org: true, retention: 365 },
+    ENTERPRISE: { on: true, max: null, auto: true, org: true, retention: null },
+    ADMIN: { on: true, max: null, auto: true, org: true, retention: null },
+  };
+  for (const [slug, m] of Object.entries(mem)) {
+    await db
+      .update(plans)
+      .set({ memoryEnabled: m.on, maxMemories: m.max, autoMemoryEnabled: m.auto, organizationMemoryEnabled: m.org, memoryRetentionDays: m.retention })
+      .where(eq(plans.slug, slug));
+  }
+
   // Give the seeded admin the ADMIN plan (entitlement via plan, not a bypass).
   const adminEmail = process.env.SEED_ADMIN_EMAIL || 'admin@biina.local';
   await db.update(users).set({ plan: 'ADMIN' }).where(eq(users.email, adminEmail));
 
-  console.log('✓ plans seeded (FREE/PRO/BUSINESS/ENTERPRISE/ADMIN) + RAG/web/connector/agent/workflow entitlements');
+  console.log('✓ plans seeded (FREE/PRO/BUSINESS/ENTERPRISE/ADMIN) + RAG/web/connector/agent/workflow/memory entitlements');
 }
 
 /**

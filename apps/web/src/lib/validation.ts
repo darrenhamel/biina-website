@@ -44,6 +44,8 @@ export const chatRequestSchema = z.object({
   freshness: z.enum(['any', 'day', 'week', 'month', 'year']).optional(),
   // Phase 10 — explicitly selected connected sources (access re-verified server-side).
   connectionIds: z.array(z.string().uuid()).max(8).optional(),
+  // Phase 13 — temporary chat: no durable memory retrieval + no memory creation.
+  temporary: z.boolean().optional(),
 });
 
 export const renameConversationSchema = z.object({
@@ -325,6 +327,37 @@ export const standingAuthSchema = z
     confirm: z.literal(true), // explicit user approval to create a standing authorization
   })
   .strict();
+
+// ---- Phase 13: memory & personalization ----
+
+const memoryTypeEnum = z.enum(['PREFERENCE', 'PROFILE_FACT', 'PROJECT_CONTEXT', 'WORKING_RELATIONSHIP', 'ORGANIZATION_CONTEXT', 'RECURRING_INSTRUCTION', 'CUSTOM']);
+
+export const createMemorySchema = z
+  .object({
+    content: z.string().trim().min(3).max(2000),
+    memoryType: memoryTypeEnum.default('PREFERENCE'),
+    ownerType: z.enum(['PERSONAL', 'ORGANIZATION']).default('PERSONAL'),
+    scope: z.enum(['GLOBAL', 'PERSONA', 'PROJECT', 'ORGANIZATION', 'WORKFLOW']).default('GLOBAL'),
+    scopeRef: z.string().max(96).optional(),
+    importance: z.number().int().min(0).max(100).optional(),
+    expiresAt: z.string().datetime().nullable().optional(),
+    // Required to store SENSITIVE/RESTRICTED content (explicit consent).
+    confirmSensitive: z.boolean().optional(),
+  })
+  .strict();
+
+export const editMemorySchema = z.object({ content: z.string().trim().min(3).max(2000) }).strict();
+
+export const memorySettingsSchema = z
+  .object({
+    memoryEnabled: z.boolean().optional(),
+    memoryMode: z.enum(['OFF', 'ASK', 'AUTO']).optional(),
+    responseStyle: z.enum(['default', 'concise', 'detailed']).optional(),
+    tone: z.enum(['default', 'formal', 'casual']).optional(),
+  })
+  .strict();
+
+export const candidateDecisionSchema = z.object({ decision: z.enum(['ACCEPTED', 'REJECTED']), confirmSensitive: z.boolean().optional() }).strict();
 
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;

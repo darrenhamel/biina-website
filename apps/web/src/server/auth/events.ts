@@ -80,7 +80,19 @@ export type SecurityEventType =
   | 'workflow.standing_auth_revoked'
   | 'workflow.standing_auth_used'
   | 'workflow.self_modification_blocked'
-  | 'workflow.policy_changed';
+  | 'workflow.policy_changed'
+  // Phase 13 — memory / personalization.
+  | 'memory.created'
+  | 'memory.edited'
+  | 'memory.deleted'
+  | 'memory.superseded'
+  | 'memory.expired'
+  | 'memory.cleared'
+  | 'memory.imported'
+  | 'memory.consent_changed'
+  | 'memory.candidate_created'
+  | 'memory.candidate_rejected'
+  | 'memory.poisoning_blocked';
 
 export async function logSecurityEvent(entry: {
   event: SecurityEventType;

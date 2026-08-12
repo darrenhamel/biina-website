@@ -71,6 +71,12 @@ export const profiles = pgTable('profiles', {
   locale: varchar('locale', { length: 8 }).notNull().default('en'),
   // Persona architecture hook — see src/config/personas.ts. Nullable = default experience.
   personaId: varchar('persona_id', { length: 32 }),
+  // Phase 13 — explicit personalization settings (AUTHORITATIVE; not inferred memory).
+  responseStyle: varchar('response_style', { length: 16 }).notNull().default('default'), // default | concise | detailed
+  tone: varchar('tone', { length: 16 }).notNull().default('default'), // default | formal | casual
+  // Phase 13 — memory CONSENT. Memory off = no retrieval + no new inferred memory.
+  memoryEnabled: boolean('memory_enabled').notNull().default(true),
+  memoryMode: varchar('memory_mode', { length: 8 }).notNull().default('ASK'), // OFF | ASK | AUTO
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -393,6 +399,12 @@ export const plans = pgTable('plans', {
   workflowRunsPerMonth: integer('workflow_runs_per_month'),
   maxWorkflowSteps: integer('max_workflow_steps'),
   scheduledWritesEnabled: boolean('scheduled_writes_enabled').notNull().default(false),
+  // Phase 13 — memory & personalization. null = unlimited for a limit.
+  memoryEnabled: boolean('memory_enabled').notNull().default(false),
+  maxMemories: integer('max_memories'),
+  autoMemoryEnabled: boolean('auto_memory_enabled').notNull().default(false),
+  organizationMemoryEnabled: boolean('organization_memory_enabled').notNull().default(false),
+  memoryRetentionDays: integer('memory_retention_days'),
   // Routing priority class (lower = higher priority). Readiness for priority routing.
   priorityClass: integer('priority_class').notNull().default(100),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -1547,3 +1559,127 @@ export type StandingAuthorization = typeof standingAuthorizations.$inferSelect;
 export type WorkflowNotification = typeof workflowNotifications.$inferSelect;
 export type WorkflowConditionState = typeof workflowConditionState.$inferSelect;
 export type AgentDefinition = typeof agentDefinitions.$inferSelect;
+
+// ==========================================================================
+// Phase 13 — memory, personalization & the context engine.
+//
+// Memory is a DISTINCT data category from conversation history, knowledge bases,
+// profile settings, and live data. It is durable, selected (not "everything the
+// user said"), consent-gated, scoped, and revocable. Memory NEVER overrides platform
+// safety, permissions, org policy, or the current explicit user request, and NEVER
+// authorizes an action. Personal and organization memory are separate security
+// domains; external/untrusted content can never create durable memory.
+// ==========================================================================
+
+export const memoryOwnerType = pgEnum('memory_owner_type', ['PERSONAL', 'ORGANIZATION']);
+export const memoryType = pgEnum('memory_type', ['PREFERENCE', 'PROFILE_FACT', 'PROJECT_CONTEXT', 'WORKING_RELATIONSHIP', 'ORGANIZATION_CONTEXT', 'RECURRING_INSTRUCTION', 'CUSTOM']);
+export const memorySource = pgEnum('memory_source', ['USER_EXPLICIT', 'CONVERSATION_INFERRED', 'ADMIN_DEFINED', 'ORGANIZATION_DEFINED', 'WORKFLOW', 'IMPORT']);
+export const memoryScope = pgEnum('memory_scope', ['GLOBAL', 'PERSONA', 'PROJECT', 'ORGANIZATION', 'WORKFLOW']);
+export const memoryStatus = pgEnum('memory_status', ['ACTIVE', 'SUPERSEDED', 'DELETED', 'EXPIRED']);
+export const memorySensitivity = pgEnum('memory_sensitivity', ['NORMAL', 'SENSITIVE', 'RESTRICTED']);
+export const memoryCandidateStatus = pgEnum('memory_candidate_status', ['PENDING', 'ACCEPTED', 'REJECTED', 'EXPIRED']);
+
+/** A durable memory (personal XOR organization). Embedding enables semantic recall. */
+export const memories = pgTable(
+  'memories',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ownerType: memoryOwnerType('owner_type').notNull(),
+    ownerUserId: uuid('owner_user_id').references(() => users.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+    memoryType: memoryType('memory_type').notNull().default('PREFERENCE'),
+    content: varchar('content', { length: 2000 }).notNull(),
+    normalizedContent: varchar('normalized_content', { length: 2000 }),
+    sourceType: memorySource('source_type').notNull(),
+    sourceId: uuid('source_id'), // e.g. the conversation a candidate came from
+    scope: memoryScope('scope').notNull().default('GLOBAL'),
+    scopeRef: varchar('scope_ref', { length: 96 }), // personaId / projectId / workflowId
+    sensitivity: memorySensitivity('sensitivity').notNull().default('NORMAL'),
+    importance: integer('importance').notNull().default(50), // 0..100
+    confidence: real('confidence').notNull().default(1), // explicit = 1.0
+    status: memoryStatus('status').notNull().default('ACTIVE'),
+    // Semantic recall (reuses the RAG embedding provider; same cosine ranking).
+    embedding: jsonb('embedding').$type<number[]>(),
+    embeddingModel: varchar('embedding_model', { length: 64 }),
+    embeddingDim: integer('embedding_dim'),
+    supersededById: uuid('superseded_by_id'),
+    consentedAt: timestamp('consented_at', { withTimezone: true }), // explicit consent for SENSITIVE/RESTRICTED
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    ownerIdx: index('memories_owner_idx').on(t.ownerUserId),
+    orgIdx: index('memories_org_idx').on(t.organizationId),
+    statusIdx: index('memories_status_idx').on(t.status),
+    typeIdx: index('memories_type_idx').on(t.memoryType),
+    scopeIdx: index('memories_scope_idx').on(t.scope),
+    expiresIdx: index('memories_expires_idx').on(t.expiresAt),
+  }),
+);
+
+/** Immutable revision history for a memory (edits, supersedes, deletions). */
+export const memoryRevisions = pgTable(
+  'memory_revisions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    memoryId: uuid('memory_id').notNull().references(() => memories.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    content: varchar('content', { length: 2000 }),
+    changeType: varchar('change_type', { length: 24 }).notNull(), // created | edited | superseded | deleted | expired | imported
+    actorUserId: uuid('actor_user_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ memIdx: index('memory_revisions_memory_idx').on(t.memoryId) }),
+);
+
+/** An inferred, NOT-yet-saved memory awaiting user consent (ASK mode). */
+export const memoryCandidates = pgTable(
+  'memory_candidates',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ownerUserId: uuid('owner_user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id'),
+    conversationId: uuid('conversation_id'),
+    candidateContent: varchar('candidate_content', { length: 2000 }).notNull(),
+    memoryType: memoryType('memory_type').notNull().default('PREFERENCE'),
+    confidence: real('confidence').notNull().default(0.5),
+    sensitivity: memorySensitivity('sensitivity').notNull().default('NORMAL'),
+    reason: varchar('reason', { length: 300 }),
+    status: memoryCandidateStatus('status').notNull().default('PENDING'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+  },
+  (t) => ({ ownerIdx: index('memory_candidates_owner_idx').on(t.ownerUserId), statusIdx: index('memory_candidates_status_idx').on(t.status) }),
+);
+
+/** Lightweight usage trail (which memories informed which request) for debugging. */
+export const memoryUsage = pgTable(
+  'memory_usage',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    memoryId: uuid('memory_id').notNull().references(() => memories.id, { onDelete: 'cascade' }),
+    requestId: uuid('request_id'),
+    userId: uuid('user_id'),
+    usedAt: timestamp('used_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ memIdx: index('memory_usage_memory_idx').on(t.memoryId) }),
+);
+
+/** Conversation compression to fit context — NOT durable memory. Tied to its chat. */
+export const conversationSummaries = pgTable('conversation_summaries', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  conversationId: uuid('conversation_id').notNull().unique().references(() => conversations.id, { onDelete: 'cascade' }),
+  summary: text('summary').notNull(),
+  messageCount: integer('message_count').notNull().default(0),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type Memory = typeof memories.$inferSelect;
+export type MemoryRevision = typeof memoryRevisions.$inferSelect;
+export type MemoryCandidate = typeof memoryCandidates.$inferSelect;
+export type MemoryUsage = typeof memoryUsage.$inferSelect;
+export type ConversationSummary = typeof conversationSummaries.$inferSelect;

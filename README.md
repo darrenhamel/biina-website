@@ -381,12 +381,44 @@ provider-independent and deduped. See [`docs/WORKFLOWS.md`](./docs/WORKFLOWS.md)
 [`docs/WORKFLOW_TEMPLATES.md`](./docs/WORKFLOW_TEMPLATES.md), and
 [`docs/WORKFLOW_COSTS.md`](./docs/WORKFLOW_COSTS.md).
 
+**Added (Phase 13):** **memory, personalization & the context engine** — BIINA.ai
+can now **remember** durable facts and preferences across conversations, and a
+**ContextEngine** is the single place that turns memory + explicit personalization
+into model context. Memory is a **distinct data category** — separate from
+conversation history, knowledge bases, profile settings, and live data — and it is
+**consent-gated**: not all conversation is memorized, and **nothing is auto-saved
+unless AUTO mode is on and the content is low-risk**. Memory is **background context,
+never authority**: it never overrides platform safety, org policy, or your **current
+request**, and it **never authorizes an action** (a "usually emails John" memory does
+not satisfy an agent approval — a standing authorization still does). Memory enters
+two ways: **explicit** "remember / forget" (deterministic, synchronous, full
+confidence) and **inferred** candidates drawn **only from your own message text**
+(never from tool/web/connected content — the poisoning boundary), surfaced for
+approval in **ASK** mode or auto-accepted only when low-risk in **AUTO** mode.
+Secrets/credentials and injected instructions are **blocked from every memory path**,
+sensitive/restricted content needs explicit consent, and personal **XOR**
+organization memory are separate security domains (Org A's memory never appears in
+Org B). You keep full control — view, search, edit, delete, clear-all (memory only,
+not your account/chats/files), review suggestions, set the mode, or turn memory off;
+**temporary chat** uses and creates no durable memory. Memory reuses the existing RAG
+embedding provider (no second vector store) and is retrieved with a tight budget
+(a few items, capped tokens). Consent lives on your **profile**, not an env var. See
+[`docs/MEMORY_ARCHITECTURE.md`](./docs/MEMORY_ARCHITECTURE.md),
+[`docs/CONTEXT_ENGINE.md`](./docs/CONTEXT_ENGINE.md),
+[`docs/PERSONALIZATION.md`](./docs/PERSONALIZATION.md),
+[`docs/MEMORY_PRIVACY.md`](./docs/MEMORY_PRIVACY.md),
+[`docs/ORGANIZATION_MEMORY.md`](./docs/ORGANIZATION_MEMORY.md), and
+[`docs/MEMORY_SECURITY.md`](./docs/MEMORY_SECURITY.md).
+
 **Deferred:** **real external write actions** (the agent ships write-capable but on
 the mock adapter; real Gmail/Calendar/Slack writes require manual activation),
 **scheduled external writes** (off by default; need a standing authorization **and**
 `WORKFLOW_SCHEDULED_WRITES_ENABLED=true`), **event/webhook & connector-event
 triggers**, **org service identities**, a **workflow template marketplace**, a
-**version-rollback UI**, automatic compensating actions (undo/rollback), **live
-provider credentials** (Google/Slack ship on the mock connector), live payment
+**version-rollback UI**, automatic compensating actions (undo/rollback),
+**model-backed memory inference** (a deterministic offline extractor ships; a model
+extractor plugs in behind it), **memory consolidation**, **conversation
+summarization**, a **memory export UI**, **background memory-expiration cleanup**,
+**live provider credentials** (Google/Slack ship on the mock connector), live payment
 activation, marketplace/payouts, a live search-provider key, a caching layer for
 fetched pages, and the pre-launch audit. See [`docs/ROADMAP.md`](./docs/ROADMAP.md).

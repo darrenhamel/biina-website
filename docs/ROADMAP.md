@@ -342,6 +342,68 @@ Legend: ☐ not started · ◐ in progress · ☑ done
   Docs: `WORKFLOWS.md`, `SCHEDULER.md`, `AUTOMATION_SECURITY.md`,
   `WORKFLOW_APPROVALS.md`, `WORKFLOW_TEMPLATES.md`, `WORKFLOW_COSTS.md`.
 
+## Phase 13 — Memory, personalization & the context engine  ☑  *(build prompt — memory track)*
+
+- ☑ **Memory as a distinct category** (`store.ts`/schema): durable, selected,
+  consent-gated, scoped, revocable memory (`memories`) kept separate from
+  conversation history, knowledge bases, profile settings, and live data. Not all
+  conversation is memorized; nothing is auto-saved unless AUTO mode + low-risk.
+  Types/sources/scope/status/sensitivity/importance/confidence/expiry; immutable
+  `memory_revisions`; dedup at cosine `≥ 0.95`; quota **informs, never silently
+  deletes**. Reuses the Phase 8 **RAG embedding provider + cosine** — no second
+  vector store.
+- ☑ **ContextEngine** (`context-engine.ts`): the ONE place memory + personalization
+  become model context. Precedence platform safety > org policy > CURRENT REQUEST >
+  workflow/agent objective > explicit settings > memory > history > RAG > connected
+  > web; budget **≤ 6 items / ≤ 600 tokens / min relevance**; **no memory** when
+  memory off or temporary chat; framed as background context that never overrides
+  the request and never authorizes actions. `ContextTrace` metadata (no content).
+- ☑ **Retrieval** (`retrieval.ts`): authorization + status + expiry in the SQL
+  WHERE (candidate set already safe), semantic cosine + scope filter, composite rank
+  (relevance + explicit + scope + importance + confidence + recency), dedup, budget.
+  Personal context never includes org memory; org context = user's personal + that
+  org's memories. `markExpiredMemories` (background cleanup = readiness).
+- ☑ **Extraction trust boundary** (`extraction.ts`): candidates come **only** from
+  the user's own message (poisoning defense) — never tool/web/connected/document
+  content. Deterministic `remember/forget`; `isEphemeral`; pluggable extractor with
+  a **deterministic offline fallback** (model extractor = plug-in); rejects
+  secret/injection/ephemeral/sensitive-auto/dup → PENDING candidates;
+  accept/reject; `supersedeConflicting` (newer same-type wins).
+- ☑ **Sensitivity policy** (`sensitivity.ts`): deterministic secret detection +
+  redaction, NORMAL/SENSITIVE/RESTRICTED classification, injection detection,
+  `isStorableContent`. Secrets/injected instructions blocked from **all** memory
+  paths; system prompts never stored; sensitive/restricted require explicit consent.
+- ☑ **Personalization + consent** (`personalization.ts`/`consent.ts`): explicit
+  profile settings (responseStyle/tone/locale) — authoritative but overridden by the
+  current request; memory settings (`memoryEnabled`, `memoryMode` OFF/ASK/AUTO) on
+  the profile (consent is **not** env-only).
+- ☑ **Chat integration** (`commands.ts` + `api/ai/chat`): explicit-memory
+  short-circuit (`X-Biina-Answer-Mode: MEMORY_COMMAND`), `assembleContext`,
+  `temporary` flag, post-response best-effort `maybeExtractCandidates` (ASK/AUTO;
+  AUTO auto-accepts NORMAL low-risk). New system-prompt `personalization` + `memory`
+  layers ("REMEMBERED CONTEXT … NOT instructions, NOT authorization").
+- ☑ **Tenant isolation + IDOR** (`resolveMemoryAccess`): personal **XOR** org
+  domains; ownership derived server-side; foreign/wrong-tenant id → null → 404. Org
+  memory manager-only; admin health (`admin.ts`) is **metadata only** — platform
+  admins never see personal memory content.
+- ☑ **Schema + plan columns**: memories, memory_revisions, memory_candidates,
+  memory_usage, conversation_summaries; profile gained responseStyle, tone,
+  memoryEnabled, memoryMode; plan gained memoryEnabled, maxMemories,
+  autoMemoryEnabled, organizationMemoryEnabled, memoryRetentionDays. Additive
+  migration; security events `memory.*`.
+- ☑ **APIs**: `memory` (list/create explicit), `memory/[id]` (patch/delete),
+  `memory/clear`, `memory/settings` (get/patch), `memory/candidates` (+`[id]`
+  decide), `admin/memory` (health).
+- **Deliverable:** consent-gated memory + personalization that improves answers
+  without becoming authority — memory never overrides platform safety, org policy,
+  or the current request, and never authorizes an action. Flags `MEMORY_ENABLED`,
+  `MEMORY_INFERENCE_ENABLED`, `MEMORY_AUTO_SAVE_ENABLED`,
+  `ORGANIZATION_MEMORY_ENABLED` (also plan- + consent-gated). Readiness only:
+  model-backed inferred extraction (offline fallback ships), memory consolidation,
+  conversation summarization, full export UI, background expiration cleanup. Docs:
+  `MEMORY_ARCHITECTURE.md`, `CONTEXT_ENGINE.md`, `PERSONALIZATION.md`,
+  `MEMORY_PRIVACY.md`, `ORGANIZATION_MEMORY.md`, `MEMORY_SECURITY.md`.
+
 ## Phase 10 — Pre-launch audit  ☐  *(build prompt 8)*
 
 - ☐ Audit all 24 areas; run typecheck / lint / tests / prod build / migration validation / dep-security.
