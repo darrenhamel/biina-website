@@ -388,6 +388,52 @@ Details: [`WEB_SEARCH.md`](./WEB_SEARCH.md) · [`WEB_GROUNDING.md`](./WEB_GROUND
 [`WEB_SECURITY.md`](./WEB_SECURITY.md) · [`CITATIONS.md`](./CITATIONS.md) ·
 [`SEARCH_PROVIDER.md`](./SEARCH_PROVIDER.md).
 
+## 4g. Connectors & external integrations (Phase 10)
+
+Grounds a chat in the user's own **external applications** (Google Drive, Gmail,
+Calendar, Slack, …) — **integration infrastructure, not a provider.** The **LLM
+never invokes a provider directly**; every external access passes through BIINA
+server components, and connectors never bypass Phase 4 routing or Phase 5 quotas.
+Reuses Phase 8/9 citation + injection-framing machinery.
+
+```
+Biina.ai → ConnectorService → Connector Registry → Provider Adapter → External Service
+Chat → user-selected connections → ConnectedSearchService → ToolExecutionService
+     → (allowlisted read tool) → adapter → normalized results → grounding block + citations
+```
+
+- **The LLM never invokes providers directly.** Search/read run through
+  `ToolExecutionService` → `ConnectorService` → adapter; the model only ever sees
+  normalized, untrusted **CONNECTED SOURCE** data with provenance.
+- **Encrypted credentials.** OAuth tokens are AES-256-GCM encrypted at rest
+  (key-versioned, KMS-ready), read/written in one module, and **never** serialized,
+  logged, or put in a prompt. Centralized OAuth: single-use bound state, PKCE,
+  session-matched callback, explicit redirect URI (no open redirect).
+- **Tool allowlist — no arbitrary HTTP.** Only allowlisted tools run; there is no
+  "fetch arbitrary URL" / "call arbitrary API" tool, which structurally removes
+  SSRF, arbitrary side effects, and exfiltration. Identity is server-derived.
+- **Read-only + write-disabled.** Phase 10 reads; write/side-effecting tools are
+  registered and risk-classified but **DISABLED** (`ACTION_NOT_ENABLED`), with
+  user-confirmation/ActionPreview deferred to Phase 11 (agents).
+- **Connection isolation.** A connection is personal **XOR** org; a personal one is
+  usable only by its owner, an org one only within that org's active workspace by a
+  verified member (Org A ≠ Org B), re-verified per connection before each call.
+- **Injection/exfiltration defense.** Connected content is **untrusted data, not
+  instructions**; it can never override policy, permissions, or tenant. The
+  email→search→send exfiltration chain is broken structurally because the
+  send/write half is disabled. Connected data is private — never sent to a web
+  search, never a web citation, never cross-tenant. Portable default: the `mock`
+  connector runs the whole path offline; Google adapters are read-only + ready.
+  Migration `0008` (additive). Gated by `plan.connectorsEnabled` + connected-search
+  quotas.
+
+Details: [`CONNECTOR_ARCHITECTURE.md`](./CONNECTOR_ARCHITECTURE.md) ·
+[`OAUTH.md`](./OAUTH.md) · [`CONNECTOR_SECURITY.md`](./CONNECTOR_SECURITY.md) ·
+[`CONNECTED_SEARCH.md`](./CONNECTED_SEARCH.md) ·
+[`GOOGLE_CONNECTORS.md`](./GOOGLE_CONNECTORS.md) ·
+[`TOOL_EXECUTION.md`](./TOOL_EXECUTION.md) ·
+[`CONNECTOR_ACTIVATION_CHECKLIST.md`](./CONNECTOR_ACTIVATION_CHECKLIST.md).
+
 ### System prompt (server-side, layered)
 
 Assembled entirely on the server (`apps/web/src/server/ai/system-prompt.ts`),

@@ -42,6 +42,8 @@ export const chatRequestSchema = z.object({
   // Phase 9 — opt-in web search (user-controlled). Entitlement/quota enforced server-side.
   webSearch: z.boolean().optional(),
   freshness: z.enum(['any', 'day', 'week', 'month', 'year']).optional(),
+  // Phase 10 — explicitly selected connected sources (access re-verified server-side).
+  connectionIds: z.array(z.string().uuid()).max(8).optional(),
 });
 
 export const renameConversationSchema = z.object({

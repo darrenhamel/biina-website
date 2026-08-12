@@ -372,6 +372,12 @@ export const plans = pgTable('plans', {
   monthlyWebSearches: integer('monthly_web_searches'),
   maxSourcesPerRequest: integer('max_sources_per_request'),
   freshnessFiltersEnabled: boolean('freshness_filters_enabled').notNull().default(false),
+  // Phase 10 — connectors / external integrations. null = unlimited for a limit.
+  connectorsEnabled: boolean('connectors_enabled').notNull().default(false),
+  maxPersonalConnections: integer('max_personal_connections'),
+  maxOrganizationConnections: integer('max_organization_connections'),
+  connectedSearchDailyLimit: integer('connected_search_daily_limit'),
+  connectedSearchMonthlyLimit: integer('connected_search_monthly_limit'),
   // Routing priority class (lower = higher priority). Readiness for priority routing.
   priorityClass: integer('priority_class').notNull().default(100),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -957,6 +963,128 @@ export const webSearchRequests = pgTable(
 );
 
 export type WebSearchRequest = typeof webSearchRequests.$inferSelect;
+
+// ==========================================================================
+// Phase 10 — connectors & external application integrations.
+//
+// STRICT SEPARATION: a connector DEFINITION (registry metadata, no secrets) vs a
+// CONNECTION (a user's or org's linked account) vs an encrypted CREDENTIAL (token
+// set, server-only, never serialized). OAuth state is single-use + bound to the
+// initiating identity. Personal and organization connections are distinct
+// security domains and never bleed across tenants.
+// ==========================================================================
+
+export const connectionType = pgEnum('connection_type', ['PERSONAL', 'ORGANIZATION']);
+export const connectionStatus = pgEnum('connection_status', ['PENDING', 'ACTIVE', 'EXPIRED', 'REAUTH_REQUIRED', 'REVOKED', 'ERROR', 'DISABLED']);
+
+/** Connector registry — safe metadata only. NEVER holds provider secrets. */
+export const connectorDefinitions = pgTable('connector_definitions', {
+  slug: varchar('slug', { length: 48 }).primaryKey(),
+  displayName: varchar('display_name', { length: 120 }).notNull(),
+  providerType: varchar('provider_type', { length: 48 }).notNull(), // google | microsoft | slack | mock | ...
+  category: varchar('category', { length: 32 }).notNull(),
+  enabled: boolean('enabled').notNull().default(false),
+  supportsOAuth: boolean('supports_oauth').notNull().default(true),
+  supportsApiKey: boolean('supports_api_key').notNull().default(false),
+  supportsPersonal: boolean('supports_personal').notNull().default(true),
+  supportsOrganization: boolean('supports_organization').notNull().default(false),
+  capabilities: jsonb('capabilities').notNull().$type<string[]>().default([]),
+  scopes: jsonb('scopes').notNull().$type<string[]>().default([]),
+  documentationUrl: varchar('documentation_url', { length: 300 }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** A linked external account (personal XOR organization). No tokens here. */
+export const connections = pgTable(
+  'connections',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    connectorSlug: varchar('connector_slug', { length: 48 }).notNull(),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+    connectionType: connectionType('connection_type').notNull(),
+    externalAccountId: varchar('external_account_id', { length: 255 }),
+    externalAccountEmail: varchar('external_account_email', { length: 320 }),
+    externalAccountName: varchar('external_account_name', { length: 200 }),
+    status: connectionStatus('status').notNull().default('PENDING'),
+    grantedScopes: jsonb('granted_scopes').$type<string[]>().default([]),
+    capabilities: jsonb('capabilities').$type<string[]>().default([]),
+    error: varchar('error', { length: 300 }),
+    connectedByUserId: uuid('connected_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    connectedAt: timestamp('connected_at', { withTimezone: true }),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index('connections_user_idx').on(t.userId),
+    orgIdx: index('connections_org_idx').on(t.organizationId),
+    connectorIdx: index('connections_connector_idx').on(t.connectorSlug),
+    statusIdx: index('connections_status_idx').on(t.status),
+  }),
+);
+
+/** Encrypted credential (OAuth token set / API key). Server-only, never serialized. */
+export const connectorCredentials = pgTable('connector_credentials', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  connectionId: uuid('connection_id')
+    .notNull()
+    .unique()
+    .references(() => connections.id, { onDelete: 'cascade' }),
+  // AES-256-GCM ciphertext (iv:tag:data, base64). Decryptable only server-side.
+  ciphertext: text('ciphertext').notNull(),
+  keyVersion: integer('key_version').notNull().default(1),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Single-use OAuth state, bound to the initiating identity + connector. */
+export const oauthStates = pgTable(
+  'oauth_states',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    state: varchar('state', { length: 96 }).notNull().unique(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    connectorSlug: varchar('connector_slug', { length: 48 }).notNull(),
+    connectionType: connectionType('connection_type').notNull(),
+    organizationId: uuid('organization_id'),
+    codeVerifier: varchar('code_verifier', { length: 128 }), // PKCE
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ expiresIdx: index('oauth_states_expires_idx').on(t.expiresAt) }),
+);
+
+/** Connector operation metering — metadata only, never external content. */
+export const connectorUsageEvents = pgTable(
+  'connector_usage_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    connectorSlug: varchar('connector_slug', { length: 48 }).notNull(),
+    operation: varchar('operation', { length: 48 }).notNull(),
+    connectionId: uuid('connection_id'),
+    userId: uuid('user_id'),
+    organizationId: uuid('organization_id'),
+    resourceType: varchar('resource_type', { length: 32 }),
+    success: boolean('success').notNull(),
+    errorCode: varchar('error_code', { length: 48 }),
+    latencyMs: integer('latency_ms'),
+    requestId: uuid('request_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index('connector_usage_user_idx').on(t.userId),
+    createdIdx: index('connector_usage_created_idx').on(t.createdAt),
+  }),
+);
+
+export type ConnectorDefinition = typeof connectorDefinitions.$inferSelect;
+export type Connection = typeof connections.$inferSelect;
+export type ConnectorCredential = typeof connectorCredentials.$inferSelect;
+export type OAuthState = typeof oauthStates.$inferSelect;
+export type ConnectorUsageEvent = typeof connectorUsageEvents.$inferSelect;
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;

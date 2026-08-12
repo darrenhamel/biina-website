@@ -19,6 +19,7 @@ import { buildRagContext, ragInstructions, type Citation, type RagMode } from '@
 import { retrievalConfig } from '@/server/rag/config';
 import { groundWithWeb } from '@/server/web/service';
 import type { WebCitation } from '@/server/web/grounding';
+import { searchConnectedSources, type ConnectorCitation } from '@/server/connectors/connected-search';
 import { isWorkload } from '@/config/ai-routing';
 import { chatRequestSchema } from '@/lib/validation';
 import { WORKSPACE_COOKIE } from '@/server/org/constants';
@@ -42,7 +43,7 @@ export async function POST(req: NextRequest) {
     const user = await getCurrentUser();
     if (!user) return unauthorized();
 
-    const { conversationId, message, model, workload, knowledgeBaseIds, ragMode, webSearch, freshness } = chatRequestSchema.parse(await req.json());
+    const { conversationId, message, model, workload, knowledgeBaseIds, ragMode, webSearch, freshness, connectionIds } = chatRequestSchema.parse(await req.json());
 
     // Resolve the active workspace from a cookie and VERIFY membership server-side
     // (never trust a browser-supplied org id). A suspended org blocks new AI usage.
@@ -79,11 +80,14 @@ export async function POST(req: NextRequest) {
     // message ONLY — private document text is never sent to a search provider.
     let ragPrompt: SystemPromptContext['rag'];
     let webPrompt: SystemPromptContext['web'];
+    let connectedPrompt: SystemPromptContext['connected'];
     const ragCitations: Array<Citation & { sourceType: 'document' }> = [];
     let webCitations: WebCitation[] = [];
+    let connectorCitations: ConnectorCitation[] = [];
     const mode: RagMode = ragMode === 'strict' ? 'strict' : 'blended';
     const wantRag = Boolean(knowledgeBaseIds && knowledgeBaseIds.length > 0 && ragMode !== 'off');
-    const plan = wantRag || webSearch ? await getPlan(user.plan) : null;
+    const wantConnected = Boolean(connectionIds && connectionIds.length > 0);
+    const plan = wantRag || webSearch || wantConnected ? await getPlan(user.plan) : null;
 
     if (wantRag && plan?.ragEnabled) {
       const { results } = await retrieveKnowledge({
@@ -122,7 +126,31 @@ export async function POST(req: NextRequest) {
         logger.warn('ai.chat.web_grounding_failed', { error: String(err) });
       }
     }
-    const citations = [...ragCitations, ...webCitations];
+
+    // Connected apps (Drive/Gmail/…): explicitly selected, access re-verified,
+    // private (never sent to public web). Query is the user's message only.
+    if (wantConnected && plan?.connectorsEnabled) {
+      try {
+        const connected = await searchConnectedSources({
+          query: message,
+          userId: user.id,
+          organizationId: orgId,
+          connectionIds: connectionIds!,
+          plan,
+          requestId: undefined,
+          signal: req.signal,
+        });
+        connectorCitations = connected.citations;
+        if (connected.hasEvidence) connectedPrompt = { instructions: connected.instructions, contextBlock: connected.contextBlock };
+      } catch (err) {
+        const ge = toGatewayError(err);
+        if (ge.code === 'quota_exceeded' || ge.code === 'not_entitled') {
+          return NextResponse.json({ error: ge.userMessage(), code: ge.code, ...(ge.data ? { data: ge.data } : {}) }, { status: ge.httpStatus() });
+        }
+        logger.warn('ai.chat.connected_grounding_failed', { error: String(err) });
+      }
+    }
+    const citations = [...ragCitations, ...webCitations, ...connectorCitations];
 
     // Build a validated routing context. Privileged fields (plan, isAdmin, org)
     // come from the authenticated session / verified membership, NOT the body.
@@ -142,11 +170,20 @@ export async function POST(req: NextRequest) {
       routeContext,
       signal: req.signal,
       conversationId: finalConvId,
-      promptContext: { personaId: user.personaId, locale: user.locale, rag: ragPrompt, web: webPrompt },
+      promptContext: { personaId: user.personaId, locale: user.locale, rag: ragPrompt, web: webPrompt, connected: connectedPrompt },
     });
 
-    // Internal answer mode (helps citations/metering/UI): private RAG and/or web.
-    const answerMode = webPrompt && ragPrompt ? 'PRIVATE_RAG_AND_WEB' : webPrompt ? 'WEB_GROUNDED' : ragPrompt ? 'PRIVATE_RAG' : 'MODEL_ONLY';
+    // Internal answer mode (helps citations/metering/UI). CONNECTED wins the label
+    // when present; otherwise web/rag as before.
+    const answerMode = connectedPrompt
+      ? 'CONNECTED_GROUNDED'
+      : webPrompt && ragPrompt
+        ? 'PRIVATE_RAG_AND_WEB'
+        : webPrompt
+          ? 'WEB_GROUNDED'
+          : ragPrompt
+            ? 'PRIVATE_RAG'
+            : 'MODEL_ONLY';
 
     // Pull the first chunk up front: routing errors + connection/model/config
     // failures surface here (before any bytes) with a proper status + safe message.

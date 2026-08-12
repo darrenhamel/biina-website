@@ -301,6 +301,30 @@ quotas. See [`docs/WEB_SEARCH.md`](./docs/WEB_SEARCH.md),
 [`docs/CITATIONS.md`](./docs/CITATIONS.md), and
 [`docs/SEARCH_PROVIDER.md`](./docs/SEARCH_PROVIDER.md).
 
-**Deferred:** live payment activation, marketplace/payouts, a live search-provider
-key (ships on the mock provider), a caching layer for fetched pages, and later
-phases (connectors, pre-launch audit). See [`docs/ROADMAP.md`](./docs/ROADMAP.md).
+**Added (Phase 10):** **connectors & external-app integration** — chat grounded in
+the user's own Google Drive / Gmail / Calendar / Slack. A centralized OAuth flow
+(single-use bound state, PKCE, session-matched callback, explicit redirect URI —
+no open redirect) and **AES-256-GCM-encrypted credentials** (server-only,
+never logged, key-versioned + KMS-ready). Every external call goes through
+`ConnectorService` / `ToolExecutionService`, which run **only allowlisted tools** —
+there is **no arbitrary-HTTP/API tool**, so SSRF and exfiltration are removed
+structurally, and identity is server-derived. Phase 10 is **read-only**: write
+tools are registered and risk-classified but **disabled** (no autonomous actions).
+Connections are personal **XOR** org with strict isolation (Org A ≠ Org B), and
+connected content is **untrusted data, not instructions** — private, never
+web-searched, never cross-tenant. A deterministic **mock** connector runs and tests
+the whole connect → search → ground → cite path offline; Google adapters are ready
+and activate via [`docs/CONNECTOR_ACTIVATION_CHECKLIST.md`](./docs/CONNECTOR_ACTIVATION_CHECKLIST.md).
+Gated by plan + connected-search quotas; never bypasses Phase 4 routing or Phase 5
+quotas. See [`docs/CONNECTOR_ARCHITECTURE.md`](./docs/CONNECTOR_ARCHITECTURE.md),
+[`docs/OAUTH.md`](./docs/OAUTH.md),
+[`docs/CONNECTOR_SECURITY.md`](./docs/CONNECTOR_SECURITY.md),
+[`docs/CONNECTED_SEARCH.md`](./docs/CONNECTED_SEARCH.md),
+[`docs/GOOGLE_CONNECTORS.md`](./docs/GOOGLE_CONNECTORS.md), and
+[`docs/TOOL_EXECUTION.md`](./docs/TOOL_EXECUTION.md).
+
+**Deferred:** the Phase 11 **agent engine** and **write/side-effecting connector
+actions** (registered but disabled, pending user-confirmation/ActionPreview), **live
+provider credentials** (Google/Slack ship on the mock connector), live payment
+activation, marketplace/payouts, a live search-provider key, a caching layer for
+fetched pages, and the pre-launch audit. See [`docs/ROADMAP.md`](./docs/ROADMAP.md).

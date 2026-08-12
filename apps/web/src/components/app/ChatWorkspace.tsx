@@ -7,6 +7,7 @@ import type { Dictionary } from '@/i18n/dictionaries';
 import { Icon } from '@/components/Icon';
 import { BrandMark } from '@/components/Logo';
 import { KnowledgeSelector, type RagMode } from './KnowledgeSelector';
+import { ConnectedSourcesSelector } from './ConnectedSourcesSelector';
 
 interface DocumentCitation {
   n: number;
@@ -31,9 +32,21 @@ interface WebCitation {
   kind?: string;
 }
 
-type Citation = DocumentCitation | WebCitation;
+interface ConnectorCitation {
+  n: number;
+  sourceType: 'connector';
+  connector: string;
+  connectionId?: string;
+  externalId?: string;
+  name: string;
+  resourceType?: string;
+  retrievedAt?: string | null;
+}
+
+type Citation = DocumentCitation | WebCitation | ConnectorCitation;
 
 const isWebCitation = (c: Citation): c is WebCitation => c.sourceType === 'web';
+const isConnectorCitation = (c: Citation): c is ConnectorCitation => c.sourceType === 'connector';
 
 type Freshness = 'any' | 'day' | 'week' | 'month' | 'year';
 
@@ -79,6 +92,8 @@ export function ChatWorkspace({
   const [webSearch, setWebSearch] = useState(false);
   const [freshness, setFreshness] = useState<Freshness>('any');
   const [searching, setSearching] = useState(false);
+  // Connected external sources selected for grounding.
+  const [connectionIds, setConnectionIds] = useState<string[]>([]);
 
   // Keep state in sync when navigating between conversations.
   useEffect(() => {
@@ -135,6 +150,7 @@ export function ChatWorkspace({
           model: model || undefined,
           ...(useRag ? { knowledgeBaseIds, ragMode } : {}),
           ...(webSearch ? { webSearch: true, freshness } : {}),
+          ...(connectionIds.length > 0 ? { connectionIds } : {}),
         }),
         signal: controller.signal,
       });
@@ -257,6 +273,8 @@ export function ChatWorkspace({
         setWebSearch={setWebSearch}
         freshness={freshness}
         setFreshness={setFreshness}
+        connectionIds={connectionIds}
+        setConnectionIds={setConnectionIds}
       />
     </div>
   );
@@ -384,8 +402,11 @@ function Citations({
   dict: Dictionary;
   locale: Locale;
 }) {
-  const docs = citations.filter((c): c is DocumentCitation => !isWebCitation(c));
+  const docs = citations.filter(
+    (c): c is DocumentCitation => !isWebCitation(c) && !isConnectorCitation(c),
+  );
   const webs = citations.filter(isWebCitation);
+  const connectors = citations.filter(isConnectorCitation);
   const fmtDate = new Intl.DateTimeFormat(locale === 'ar' ? 'ar-AE' : 'en-US', {
     dateStyle: 'medium',
   });
@@ -451,6 +472,22 @@ function Citations({
           </ul>
         </div>
       )}
+      {connectors.length > 0 && (
+        <div className="rounded-xl border border-line bg-paper-sunken px-3 py-2">
+          <p className="flex items-center gap-1.5 text-xs font-semibold text-ink-soft">
+            <Icon name="spark" width={12} height={12} />
+            {dict.connectors.sources}
+          </p>
+          <ul className="mt-1 space-y-0.5">
+            {connectors.map((c) => (
+              <li key={`c-${c.n}-${c.connectionId ?? c.externalId ?? c.name}`} className="text-xs text-ink-soft">
+                <span className="font-semibold text-ink">[{c.n}]</span> {c.name}
+                <span className="text-ink-faint"> — {c.connector}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -475,6 +512,8 @@ function Composer({
   setWebSearch,
   freshness,
   setFreshness,
+  connectionIds,
+  setConnectionIds,
 }: {
   dict: Dictionary;
   input: string;
@@ -495,6 +534,8 @@ function Composer({
   setWebSearch: (v: boolean) => void;
   freshness: Freshness;
   setFreshness: (v: Freshness) => void;
+  connectionIds: string[];
+  setConnectionIds: (ids: string[]) => void;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -550,6 +591,11 @@ function Composer({
             onSelectedChange={setKnowledgeBaseIds}
             mode={ragMode}
             onModeChange={setRagMode}
+          />
+          <ConnectedSourcesSelector
+            dict={dict}
+            selected={connectionIds}
+            onSelectedChange={setConnectionIds}
           />
           <button
             type="button"

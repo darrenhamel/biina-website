@@ -194,6 +194,49 @@ Legend: ☐ not started · ◐ in progress · ☑ done
   `WEB_SEARCH.md`, `WEB_GROUNDING.md`, `WEB_SECURITY.md`, `CITATIONS.md`,
   `SEARCH_PROVIDER.md`.
 
+## Phase 10 — Connectors & external integrations  ☑  *(build prompt — connectors track)*
+
+- ☑ Centralized **OAuth** (`oauth.ts`): single-use, expiring, user/connector/type/
+  org-**bound** state; **PKCE `S256`** where supported; **session-matched** callback
+  (defeats OAuth CSRF/account-linking); **explicit** redirect URI (no open redirect).
+  A `mock` provider completes the flow **offline**.
+- ☑ **Encrypted credentials** (`crypto.ts`/`credentials.ts`): AES-256-GCM at rest,
+  key from `CONNECTOR_CREDENTIAL_ENCRYPTION_KEY` (stable, never logged/committed),
+  `keyVersion`-tagged for lazy rotation, **KMS-ready** seam. Tokens are never
+  serialized, logged, or put in a prompt; one module reads/writes them.
+- ☑ **Connection isolation** (`connections.ts`): personal **XOR** org; personal
+  usable only by its owner, org usable only within that org's active workspace by a
+  verified member (**Org A ≠ Org B**); `resolveConnectionAccess` → null → 404,
+  re-verified per connection before each call.
+- ☑ **Tool allowlist** (`registry.ts`/`tool-execution.ts`): `ToolExecutionService`
+  runs **only** allowlisted tools — **no arbitrary-HTTP/API tool** (structurally
+  blocks SSRF/side effects/exfiltration); server-derived identity; capability +
+  scope enforced by `ConnectorService`; normalized errors + metering + audit.
+- ☑ **Read-only / write-disabled**: read tools (mock/drive/gmail/calendar/slack)
+  enabled; write tools (`gmail.send`/`calendar.create`/`drive.delete`) registered +
+  risk-classified but **DISABLED** → `ACTION_NOT_ENABLED` (`connector.action_blocked`),
+  gated by `CONNECTOR_WRITE_ACTIONS_ENABLED`. No autonomous actions.
+- ☑ **Connected grounding + citations** (`connected-search.ts`): explicitly-selected
+  connections searched (query = **user's question only**); untrusted **CONNECTED
+  SOURCE** blocks (injection defense mirrors RAG/web); `connector` citations,
+  permission re-checked on open; private data never web-searched, never cross-tenant.
+- ☑ **Plan/quota**: `plans` gained `connectorsEnabled`, max personal/org connections,
+  connected-search daily/monthly limits (FREE none → ENTERPRISE/ADMIN unlimited);
+  `connector_usage_events` metering (metadata only). Migration `0008` (additive),
+  seed registers 5 connectors (mock ENABLED; Google/Slack DISABLED until OAuth set).
+- ☑ **Mock-provider default with Google adapters ready**: the full connect → search →
+  read → ground → cite path runs offline on `mock`; Google Drive/Gmail/Calendar
+  adapters are read-only + correct in shape but not exercised without live creds.
+  Crypto/OAuth/isolation/allowlist/connected-search unit tests. Admin → Connectors
+  overview (metadata only) + enable/disable.
+- **Deliverable:** external-app-grounded chat, portable + tested on the mock
+  connector; production activates Google via `CONNECTOR_ACTIVATION_CHECKLIST.md`.
+  **Read-only, write-disabled.** Docs: `CONNECTOR_ARCHITECTURE.md`, `OAUTH.md`,
+  `CONNECTOR_SECURITY.md`, `CONNECTED_SEARCH.md`, `GOOGLE_CONNECTORS.md`,
+  `TOOL_EXECUTION.md`, `CONNECTOR_ACTIVATION_CHECKLIST.md`.
+  **Next: Phase 11 — the agent engine** (planning over the tool allowlist +
+  ActionPreview/confirmation to safely enable write actions).
+
 ## Phase 10 — Pre-launch audit  ☐  *(build prompt 8)*
 
 - ☐ Audit all 24 areas; run typecheck / lint / tests / prod build / migration validation / dep-security.

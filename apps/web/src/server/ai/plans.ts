@@ -44,6 +44,11 @@ const FALLBACK_FREE: Plan = {
   monthlyWebSearches: null,
   maxSourcesPerRequest: null,
   freshnessFiltersEnabled: false,
+  connectorsEnabled: false,
+  maxPersonalConnections: null,
+  maxOrganizationConnections: null,
+  connectedSearchDailyLimit: null,
+  connectedSearchMonthlyLimit: null,
   priorityClass: 100,
   updatedAt: new Date(0),
 };

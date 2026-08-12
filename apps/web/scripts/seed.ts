@@ -24,6 +24,7 @@ import {
   plans,
   commercialPrices,
   billingConfig,
+  connectorDefinitions,
 } from '../src/server/db/schema';
 
 async function main() {
@@ -39,6 +40,7 @@ async function main() {
   await seedAiCatalog(db);
   await seedPlans(db);
   await seedBilling(db);
+  await seedConnectors(db);
 
   await sql.end();
   console.log('Seed complete.');
@@ -326,6 +328,21 @@ async function seedPlans(db: DB) {
       .where(eq(plans.slug, slug));
   }
 
+  // Phase 10 — connector entitlements per tier (configurable placeholders).
+  const conn: Record<string, { on: boolean; personal: number | null; org: number | null; day: number | null; month: number | null }> = {
+    FREE: { on: false, personal: 0, org: 0, day: 0, month: 0 },
+    PRO: { on: true, personal: 5, org: 0, day: 50, month: 500 },
+    BUSINESS: { on: true, personal: 10, org: 20, day: 500, month: 5000 },
+    ENTERPRISE: { on: true, personal: null, org: null, day: null, month: null },
+    ADMIN: { on: true, personal: null, org: null, day: null, month: null },
+  };
+  for (const [slug, c] of Object.entries(conn)) {
+    await db
+      .update(plans)
+      .set({ connectorsEnabled: c.on, maxPersonalConnections: c.personal, maxOrganizationConnections: c.org, connectedSearchDailyLimit: c.day, connectedSearchMonthlyLimit: c.month })
+      .where(eq(plans.slug, slug));
+  }
+
   // Give the seeded admin the ADMIN plan (entitlement via plan, not a bypass).
   const adminEmail = process.env.SEED_ADMIN_EMAIL || 'admin@biina.local';
   await db.update(users).set({ plan: 'ADMIN' }).where(eq(users.email, adminEmail));
@@ -372,6 +389,27 @@ async function seedBilling(db: DB) {
       .onConflictDoNothing({ target: [commercialPrices.billingProvider, commercialPrices.providerPriceId] });
   }
   console.log(`✓ billing seeded (${rows.length} commercial prices${isTest ? ', TEST' : ''})`);
+}
+
+/**
+ * Seed the connector registry (SAFE metadata only — never secrets). The 'mock'
+ * connector is enabled so the framework is exercisable out of the box; real
+ * providers are DISABLED until OAuth credentials are configured (see
+ * docs/CONNECTOR_ACTIVATION_CHECKLIST.md).
+ */
+async function seedConnectors(db: DB) {
+  const G = (s: string) => `https://www.googleapis.com/auth/${s}`;
+  const rows = [
+    { slug: 'mock', displayName: 'Demo Connector', providerType: 'mock', category: 'Other', enabled: true, supportsOAuth: true, supportsPersonal: true, supportsOrganization: true, capabilities: ['SEARCH', 'READ'], scopes: [] as string[] },
+    { slug: 'google-drive', displayName: 'Google Drive', providerType: 'google', category: 'File Storage', enabled: false, supportsOAuth: true, supportsPersonal: true, supportsOrganization: true, capabilities: ['SEARCH', 'LIST', 'READ', 'DOWNLOAD'], scopes: ['openid', 'email', 'profile', G('drive.readonly')] },
+    { slug: 'gmail', displayName: 'Gmail', providerType: 'google', category: 'Email', enabled: false, supportsOAuth: true, supportsPersonal: true, supportsOrganization: false, capabilities: ['SEARCH', 'READ'], scopes: ['openid', 'email', 'profile', G('gmail.readonly')] },
+    { slug: 'google-calendar', displayName: 'Google Calendar', providerType: 'google', category: 'Calendar', enabled: false, supportsOAuth: true, supportsPersonal: true, supportsOrganization: false, capabilities: ['LIST', 'SEARCH', 'READ'], scopes: ['openid', 'email', 'profile', G('calendar.readonly')] },
+    { slug: 'slack', displayName: 'Slack', providerType: 'slack', category: 'Communication', enabled: false, supportsOAuth: true, supportsPersonal: false, supportsOrganization: true, capabilities: ['SEARCH', 'READ'], scopes: ['search:read', 'channels:history'] },
+  ];
+  for (const r of rows) {
+    await db.insert(connectorDefinitions).values(r).onConflictDoNothing({ target: connectorDefinitions.slug });
+  }
+  console.log(`✓ connectors seeded (${rows.length}; mock enabled, real providers disabled until OAuth configured)`);
 }
 
 main().catch((err) => {

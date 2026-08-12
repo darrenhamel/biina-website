@@ -273,6 +273,7 @@ function AccountMenu({
             <MenuLink href={`/${locale}/app/account`} icon="user" label={dict.nav.account} onClick={() => setOpen(false)} />
             <MenuLink href={`/${locale}/app/organizations`} icon="user" label={dict.nav.organizations} onClick={() => setOpen(false)} />
             <MenuLink href={`/${locale}/app/security`} icon="shield" label={dict.nav.security} onClick={() => setOpen(false)} />
+            <MenuLink href={`/${locale}/app/settings/connections`} icon="spark" label={dict.connectors.title} onClick={() => setOpen(false)} />
             <MenuLink href={`/${locale}/app/usage`} icon="spark" label={dict.nav.usage} onClick={() => setOpen(false)} />
             <MenuLink href={`/${locale}/app/settings/billing`} icon="spark" label={dict.nav.billing} onClick={() => setOpen(false)} />
             <MenuLink href={`/${locale}/app/settings`} icon="settings" label={dict.nav.settings} onClick={() => setOpen(false)} />

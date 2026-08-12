@@ -72,6 +72,7 @@ export default async function AdminPage({ params }: { params: { locale: string }
           <AdminLink href={`/${locale}/app/admin/ai`} icon="spark" title={dict.admin.aiControl} sub={dict.admin.aiControlSub} />
           <AdminLink href={`/${locale}/app/admin/rag`} icon="files" title={dict.adminRag.title} sub={dict.adminRag.subtitle} />
           <AdminLink href={`/${locale}/app/admin/web`} icon="globe" title={dict.adminWeb.title} sub={dict.adminWeb.subtitle} />
+          <AdminLink href={`/${locale}/app/admin/connectors`} icon="spark" title={dict.adminConnectors.title} sub={dict.adminConnectors.subtitle} />
           <AdminLink href={`/${locale}/app/admin/usage`} icon="discover" title={dict.admin.usageCost} sub={dict.admin.usageCostSub} />
           <AdminLink href={`/${locale}/app/admin/plans`} icon="templates" title={dict.admin.plans} sub={dict.admin.plansSub} />
           <AdminLink href={`/${locale}/app/admin/billing`} icon="spark" title={dict.adminBilling.title} sub={dict.adminBilling.subtitle} />

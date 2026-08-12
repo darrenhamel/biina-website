@@ -37,7 +37,15 @@ export type SecurityEventType =
   | 'kb.deleted'
   | 'file.uploaded'
   | 'file.deleted'
-  | 'file.reprocessed';
+  | 'file.reprocessed'
+  // Phase 10 — connectors / external integrations.
+  | 'connector.connected'
+  | 'connector.revoked'
+  | 'connector.reauth_required'
+  | 'connector.search'
+  | 'connector.read'
+  | 'connector.action_attempted'
+  | 'connector.action_blocked';
 
 export async function logSecurityEvent(entry: {
   event: SecurityEventType;
