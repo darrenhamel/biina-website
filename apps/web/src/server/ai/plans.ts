@@ -55,6 +55,13 @@ const FALLBACK_FREE: Plan = {
   agentMaxStepsPerSession: null,
   agentWriteActionsDailyLimit: null,
   agentExternalMessagesDailyLimit: null,
+  workflowsEnabled: false,
+  maxActiveWorkflows: null,
+  scheduledAutomationsEnabled: false,
+  conditionAutomationsEnabled: false,
+  workflowRunsPerMonth: null,
+  maxWorkflowSteps: null,
+  scheduledWritesEnabled: false,
   priorityClass: 100,
   updatedAt: new Date(0),
 };

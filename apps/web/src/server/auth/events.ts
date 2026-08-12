@@ -60,7 +60,27 @@ export type SecurityEventType =
   | 'agent.action_executed'
   | 'agent.action_failed'
   | 'agent.action_unknown_outcome'
-  | 'agent.policy_changed';
+  | 'agent.policy_changed'
+  // Phase 12 — workflows / scheduled automations.
+  | 'workflow.created'
+  | 'workflow.updated'
+  | 'workflow.activated'
+  | 'workflow.paused'
+  | 'workflow.resumed'
+  | 'workflow.disabled'
+  | 'workflow.auto_paused'
+  | 'workflow.archived'
+  | 'workflow.run_started'
+  | 'workflow.run_completed'
+  | 'workflow.run_failed'
+  | 'workflow.run_blocked'
+  | 'workflow.run_skipped'
+  | 'workflow.approval_needed'
+  | 'workflow.standing_auth_created'
+  | 'workflow.standing_auth_revoked'
+  | 'workflow.standing_auth_used'
+  | 'workflow.self_modification_blocked'
+  | 'workflow.policy_changed';
 
 export async function logSecurityEvent(entry: {
   event: SecurityEventType;

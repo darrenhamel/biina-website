@@ -358,11 +358,26 @@ async function seedPlans(db: DB) {
       .where(eq(plans.slug, slug));
   }
 
+  // Phase 12 — workflow/automation entitlements per tier. FREE has no workflows.
+  const wf: Record<string, { on: boolean; active: number | null; sched: boolean; cond: boolean; runs: number | null; steps: number | null; writes: boolean }> = {
+    FREE: { on: false, active: 0, sched: false, cond: false, runs: 0, steps: 0, writes: false },
+    PRO: { on: true, active: 5, sched: true, cond: true, runs: 300, steps: 8, writes: false },
+    BUSINESS: { on: true, active: 25, sched: true, cond: true, runs: 3000, steps: 12, writes: true },
+    ENTERPRISE: { on: true, active: null, sched: true, cond: true, runs: null, steps: 15, writes: true },
+    ADMIN: { on: true, active: null, sched: true, cond: true, runs: null, steps: 20, writes: true },
+  };
+  for (const [slug, w] of Object.entries(wf)) {
+    await db
+      .update(plans)
+      .set({ workflowsEnabled: w.on, maxActiveWorkflows: w.active, scheduledAutomationsEnabled: w.sched, conditionAutomationsEnabled: w.cond, workflowRunsPerMonth: w.runs, maxWorkflowSteps: w.steps, scheduledWritesEnabled: w.writes })
+      .where(eq(plans.slug, slug));
+  }
+
   // Give the seeded admin the ADMIN plan (entitlement via plan, not a bypass).
   const adminEmail = process.env.SEED_ADMIN_EMAIL || 'admin@biina.local';
   await db.update(users).set({ plan: 'ADMIN' }).where(eq(users.email, adminEmail));
 
-  console.log('✓ plans seeded (FREE/PRO/BUSINESS/ENTERPRISE/ADMIN) + RAG/web/connector/agent entitlements');
+  console.log('✓ plans seeded (FREE/PRO/BUSINESS/ENTERPRISE/ADMIN) + RAG/web/connector/agent/workflow entitlements');
 }
 
 /**

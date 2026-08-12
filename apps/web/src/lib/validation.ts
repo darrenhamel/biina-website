@@ -260,6 +260,73 @@ export const agentPolicySchema = z
   })
   .strict();
 
+// ---- Phase 12: workflows & automations ----
+
+const scheduleObject = z
+  .object({
+    pattern: z.enum(['once', 'daily', 'weekly', 'monthly', 'cron']),
+    time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/).optional(),
+    weekday: z.number().int().min(0).max(6).optional(),
+    day: z.number().int().min(1).max(31).optional(),
+    at: z.string().datetime().optional(),
+    cron: z.string().max(120).optional(),
+  })
+  .strict();
+
+export const workflowTriggerSchema = z
+  .object({
+    type: z.enum(['MANUAL', 'SCHEDULE', 'CONDITION']),
+    schedule: scheduleObject.optional(),
+    timezone: z.string().max(64).optional(),
+    conditionType: z.enum(['USAGE_THRESHOLD', 'CONNECTOR_NEW_ITEMS', 'SEMANTIC_MATCH']).optional(),
+    conditionConfig: z.record(z.string(), z.unknown()).optional(),
+    checkIntervalMinutes: z.number().int().min(15).max(1440).optional(),
+    missedRunPolicy: z.enum(['SKIP', 'RUN_ONCE_WHEN_RECOVERED', 'CATCH_UP_LIMITED']).optional(),
+  })
+  .strict();
+
+export const createWorkflowSchema = z
+  .object({
+    name: z.string().trim().min(2).max(160),
+    description: z.string().trim().max(600).optional(),
+    goal: z.string().trim().min(5).max(8000),
+    ownerType: z.enum(['PERSONAL', 'ORGANIZATION']).default('PERSONAL'),
+    agentMode: z.enum(['ASSISTED', 'AGENT']).default('AGENT'),
+    approvalPolicy: z.enum(['ASK_EVERY_WRITE', 'ASK_HIGH_RISK_ONLY', 'READ_ONLY_AUTOMATIC']).default('ASK_EVERY_WRITE'),
+    timezone: z.string().max(64).default('UTC'),
+    trigger: workflowTriggerSchema,
+    knowledgeBaseIds: z.array(z.string().uuid()).max(20).optional(),
+    connectionIds: z.array(z.string().uuid()).max(8).optional(),
+    webSearchEnabled: z.boolean().optional(),
+    maxSteps: z.number().int().min(1).max(20).optional(),
+    maxToolCalls: z.number().int().min(1).max(40).optional(),
+    maxWritesPerRun: z.number().int().min(0).max(5).optional(),
+    maxCostPerRun: z.number().min(0).max(100).optional(),
+    maxRunsPerDay: z.number().int().min(1).max(100).optional(),
+    maxRunsPerMonth: z.number().int().min(1).max(3000).optional(),
+    notifyOnSuccess: z.enum(['NEVER', 'MEANINGFUL', 'EVERY']).optional(),
+    notifyOnFailure: z.boolean().optional(),
+  })
+  .strict();
+
+export const updateWorkflowSchema = createWorkflowSchema.partial().strict();
+
+export const compileWorkflowSchema = z.object({ text: z.string().trim().min(5).max(2000), timezone: z.string().max(64).optional() }).strict();
+
+export const standingAuthSchema = z
+  .object({
+    workflowId: z.string().uuid(),
+    toolId: z.string().max(64),
+    connectionId: z.string().uuid(),
+    allowedDestinations: z.array(z.string().trim().min(1).max(320)).min(1).max(20),
+    maxExecutions: z.number().int().min(1).max(1000).nullable().optional(),
+    maxExecutionsPerDay: z.number().int().min(1).max(100).nullable().optional(),
+    expiresInDays: z.number().int().min(1).max(365).default(90),
+    confirm: z.literal(true), // explicit user approval to create a standing authorization
+  })
+  .strict();
+
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ChatRequestInput = z.infer<typeof chatRequestSchema>;
+export type CreateWorkflowInput = z.infer<typeof createWorkflowSchema>;

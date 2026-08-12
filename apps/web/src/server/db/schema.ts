@@ -385,6 +385,14 @@ export const plans = pgTable('plans', {
   agentMaxStepsPerSession: integer('agent_max_steps_per_session'),
   agentWriteActionsDailyLimit: integer('agent_write_actions_daily_limit'),
   agentExternalMessagesDailyLimit: integer('agent_external_messages_daily_limit'),
+  // Phase 12 — workflows / scheduled automations. null = unlimited for a limit.
+  workflowsEnabled: boolean('workflows_enabled').notNull().default(false),
+  maxActiveWorkflows: integer('max_active_workflows'),
+  scheduledAutomationsEnabled: boolean('scheduled_automations_enabled').notNull().default(false),
+  conditionAutomationsEnabled: boolean('condition_automations_enabled').notNull().default(false),
+  workflowRunsPerMonth: integer('workflow_runs_per_month'),
+  maxWorkflowSteps: integer('max_workflow_steps'),
+  scheduledWritesEnabled: boolean('scheduled_writes_enabled').notNull().default(false),
   // Routing priority class (lower = higher priority). Readiness for priority routing.
   priorityClass: integer('priority_class').notNull().default(100),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -1288,3 +1296,254 @@ export type AgentStep = typeof agentSteps.$inferSelect;
 export type AgentAction = typeof agentActions.$inferSelect;
 export type ApprovalRequest = typeof approvalRequests.$inferSelect;
 export type AgentPolicy = typeof agentPolicies.$inferSelect;
+
+// ==========================================================================
+// Phase 12 — workflows, scheduled automations & reusable agents.
+//
+// A workflow is NOT a new source of authority: every run passes through the same
+// Phase 11 trusted controls (AgentOrchestrator → ActionPolicyService → Approval →
+// ToolExecutionService). Scheduling grants no new permissions. The DATABASE is the
+// authoritative scheduler; a background worker (authenticated tick) claims due runs
+// with a unique run key so a workflow never double-executes. Standing authorizations
+// are NARROW (tool + connection + destination + limits + expiry) and are the only
+// way a scheduled external write runs without a per-run human approval.
+// ==========================================================================
+
+export const workflowOwnerType = pgEnum('workflow_owner_type', ['PERSONAL', 'ORGANIZATION']);
+export const workflowStatus = pgEnum('workflow_status', ['DRAFT', 'ACTIVE', 'PAUSED', 'DISABLED', 'ARCHIVED', 'AUTO_PAUSED']);
+export const workflowTriggerType = pgEnum('workflow_trigger_type', ['MANUAL', 'SCHEDULE', 'CONDITION', 'WEBHOOK', 'CONNECTOR_EVENT']);
+export const workflowRunStatus = pgEnum('workflow_run_status', ['QUEUED', 'RUNNING', 'AWAITING_APPROVAL', 'COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED', 'CANCELED', 'SKIPPED', 'BLOCKED']);
+export const workflowApprovalPolicy = pgEnum('workflow_approval_policy', ['ASK_EVERY_WRITE', 'ASK_HIGH_RISK_ONLY', 'READ_ONLY_AUTOMATIC']);
+export const standingAuthStatus = pgEnum('standing_auth_status', ['ACTIVE', 'REVOKED', 'EXPIRED']);
+
+/** Reusable agent definition — configuration + instructions, NEVER credentials/identity. */
+export const agentDefinitions = pgTable(
+  'agent_definitions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ownerType: workflowOwnerType('owner_type').notNull(),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 120 }).notNull(),
+    description: varchar('description', { length: 400 }),
+    // Custom instructions are LOWER priority than platform/org/tool policy.
+    instructions: text('instructions').notNull().default(''),
+    allowedTools: jsonb('allowed_tools').notNull().$type<string[]>().default([]),
+    allowedConnectors: jsonb('allowed_connectors').notNull().$type<string[]>().default([]),
+    defaultModelProfile: varchar('default_model_profile', { length: 64 }),
+    maxSteps: integer('max_steps').notNull().default(8),
+    maxToolCalls: integer('max_tool_calls').notNull().default(16),
+    approvalPolicy: workflowApprovalPolicy('approval_policy').notNull().default('ASK_EVERY_WRITE'),
+    enabled: boolean('enabled').notNull().default(true),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ userIdx: index('agent_defs_user_idx').on(t.userId), orgIdx: index('agent_defs_org_idx').on(t.organizationId) }),
+);
+
+/** A reusable workflow (configuration). Runtime state lives in workflow_runs. */
+export const workflows = pgTable(
+  'workflows',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ownerType: workflowOwnerType('owner_type').notNull(),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 160 }).notNull(),
+    description: varchar('description', { length: 600 }),
+    // The instruction/goal the agent pursues each run (server-side; untrusted content stays data).
+    goal: text('goal').notNull(),
+    agentDefinitionId: uuid('agent_definition_id'),
+    status: workflowStatus('status').notNull().default('DRAFT'),
+    version: integer('version').notNull().default(1),
+    triggerType: workflowTriggerType('trigger_type').notNull().default('MANUAL'),
+    agentMode: agentMode('agent_mode').notNull().default('AGENT'),
+    approvalPolicy: workflowApprovalPolicy('approval_policy').notNull().default('ASK_EVERY_WRITE'),
+    timezone: varchar('timezone', { length: 64 }).notNull().default('UTC'),
+    // Sources / tools / recipients selected at setup (safe metadata, no secrets).
+    knowledgeBaseIds: jsonb('knowledge_base_ids').notNull().$type<string[]>().default([]),
+    connectionIds: jsonb('connection_ids').notNull().$type<string[]>().default([]),
+    webSearchEnabled: boolean('web_search_enabled').notNull().default(false),
+    inputs: jsonb('inputs').$type<Record<string, unknown>>().default({}),
+    // Limits (platform hard limits still override these).
+    maxSteps: integer('max_steps').notNull().default(8),
+    maxToolCalls: integer('max_tool_calls').notNull().default(16),
+    maxWritesPerRun: integer('max_writes_per_run').notNull().default(1),
+    maxCostPerRun: real('max_cost_per_run'),
+    maxRunsPerDay: integer('max_runs_per_day'),
+    maxRunsPerMonth: integer('max_runs_per_month'),
+    monthlyCostBudget: real('monthly_cost_budget'),
+    overlapPolicy: varchar('overlap_policy', { length: 12 }).notNull().default('SKIP'),
+    notifyOnSuccess: varchar('notify_on_success', { length: 16 }).notNull().default('MEANINGFUL'), // NEVER | MEANINGFUL | EVERY
+    notifyOnFailure: boolean('notify_on_failure').notNull().default(true),
+    maxConsecutiveFailures: integer('max_consecutive_failures').notNull().default(5),
+    consecutiveFailures: integer('consecutive_failures').notNull().default(0),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    lastRunAt: timestamp('last_run_at', { withTimezone: true }),
+    nextRunAt: timestamp('next_run_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index('workflows_user_idx').on(t.userId),
+    orgIdx: index('workflows_org_idx').on(t.organizationId),
+    statusIdx: index('workflows_status_idx').on(t.status),
+    nextRunIdx: index('workflows_next_run_idx').on(t.nextRunAt),
+  }),
+);
+
+/** Immutable configuration snapshot per workflow version (safe fields only, no secrets). */
+export const workflowVersions = pgTable(
+  'workflow_versions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workflowId: uuid('workflow_id').notNull().references(() => workflows.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    snapshot: jsonb('snapshot').notNull(),
+    configHash: varchar('config_hash', { length: 96 }).notNull(),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ wfUnique: unique('workflow_versions_unique').on(t.workflowId, t.version) }),
+);
+
+/** Normalized trigger config (one active trigger per workflow in Phase 12). */
+export const workflowTriggers = pgTable(
+  'workflow_triggers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workflowId: uuid('workflow_id').notNull().references(() => workflows.id, { onDelete: 'cascade' }),
+    type: workflowTriggerType('type').notNull(),
+    // Structured recurrence: { pattern: 'daily'|'weekly'|'monthly'|'once'|'cron', time?, weekday?, day?, at?, cron? }
+    schedule: jsonb('schedule').$type<Record<string, unknown>>(),
+    timezone: varchar('timezone', { length: 64 }).notNull().default('UTC'),
+    // Condition triggers (allowlisted; never arbitrary code).
+    conditionType: varchar('condition_type', { length: 48 }),
+    conditionConfig: jsonb('condition_config').$type<Record<string, unknown>>(),
+    checkIntervalMinutes: integer('check_interval_minutes'),
+    // Missed-run policy for downtime: SKIP | RUN_ONCE_WHEN_RECOVERED | CATCH_UP_LIMITED
+    missedRunPolicy: varchar('missed_run_policy', { length: 24 }).notNull().default('RUN_ONCE_WHEN_RECOVERED'),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ wfIdx: index('workflow_triggers_workflow_idx').on(t.workflowId) }),
+);
+
+/** One execution attempt of a workflow. Never overwrites workflow configuration. */
+export const workflowRuns = pgTable(
+  'workflow_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workflowId: uuid('workflow_id').notNull().references(() => workflows.id, { onDelete: 'cascade' }),
+    workflowVersion: integer('workflow_version').notNull().default(1),
+    triggerType: workflowTriggerType('trigger_type').notNull(),
+    userId: uuid('user_id'),
+    organizationId: uuid('organization_id'),
+    status: workflowRunStatus('status').notNull().default('QUEUED'),
+    // Duplicate-run prevention: workflowId + scheduled instant is unique.
+    runKey: varchar('run_key', { length: 120 }).notNull(),
+    scheduledFor: timestamp('scheduled_for', { withTimezone: true }),
+    agentSessionId: uuid('agent_session_id'),
+    dryRun: boolean('dry_run').notNull().default(false),
+    stepsExecuted: integer('steps_executed').notNull().default(0),
+    toolCalls: integer('tool_calls').notNull().default(0),
+    writeActions: integer('write_actions').notNull().default(0),
+    estimatedCost: real('estimated_cost').notNull().default(0),
+    // Heartbeat + locking for durable, single-owner execution.
+    lockedBy: varchar('locked_by', { length: 80 }),
+    lockedAt: timestamp('locked_at', { withTimezone: true }),
+    heartbeatAt: timestamp('heartbeat_at', { withTimezone: true }),
+    attempt: integer('attempt').notNull().default(1),
+    errorCode: varchar('error_code', { length: 48 }),
+    errorSummary: varchar('error_summary', { length: 400 }),
+    resultSummary: varchar('result_summary', { length: 1000 }),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    workflowIdx: index('workflow_runs_workflow_idx').on(t.workflowId),
+    statusIdx: index('workflow_runs_status_idx').on(t.status),
+    createdIdx: index('workflow_runs_created_idx').on(t.createdAt),
+    runKeyUnique: unique('workflow_runs_run_key_unique').on(t.workflowId, t.runKey),
+  }),
+);
+
+/**
+ * Narrow standing authorization — the ONLY way a scheduled external write runs
+ * without a per-run human approval. Tightly bound to tool + connection + workflow
+ * + destination allowlist + limits + expiry. Creating one requires explicit user
+ * approval; revoking is immediate and future runs re-check.
+ */
+export const standingAuthorizations = pgTable(
+  'standing_authorizations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id'),
+    workflowId: uuid('workflow_id').references(() => workflows.id, { onDelete: 'cascade' }),
+    toolId: varchar('tool_id', { length: 64 }).notNull(),
+    connectionId: uuid('connection_id').notNull(),
+    riskCeiling: varchar('risk_ceiling', { length: 32 }).notNull(),
+    // Destination binding: allowed recipients / channels / calendars (exact match).
+    allowedDestinations: jsonb('allowed_destinations').notNull().$type<string[]>().default([]),
+    maxExecutions: integer('max_executions'),
+    maxExecutionsPerDay: integer('max_executions_per_day'),
+    executionsUsed: integer('executions_used').notNull().default(0),
+    status: standingAuthStatus('status').notNull().default('ACTIVE'),
+    approvedByUserId: uuid('approved_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    startsAt: timestamp('starts_at', { withTimezone: true }).notNull().defaultNow(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ userIdx: index('standing_auth_user_idx').on(t.userId), wfIdx: index('standing_auth_workflow_idx').on(t.workflowId), expiresIdx: index('standing_auth_expires_idx').on(t.expiresAt) }),
+);
+
+/** Provider-independent notifications for automation results (in-app + email). */
+export const workflowNotifications = pgTable(
+  'workflow_notifications',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id'),
+    workflowId: uuid('workflow_id'),
+    workflowRunId: uuid('workflow_run_id'),
+    channel: varchar('channel', { length: 16 }).notNull().default('IN_APP'),
+    kind: varchar('kind', { length: 32 }).notNull(), // result | failure | approval_needed | condition_matched | auto_paused
+    title: varchar('title', { length: 200 }).notNull(),
+    body: varchar('body', { length: 1000 }),
+    // Dedup key to suppress identical alerts (retries, unchanged conditions).
+    dedupeKey: varchar('dedupe_key', { length: 160 }),
+    readAt: timestamp('read_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ userIdx: index('workflow_notifications_user_idx').on(t.userId), dedupeUnique: unique('workflow_notifications_dedupe_unique').on(t.userId, t.dedupeKey) }),
+);
+
+/** Condition-watch state: cursors + matched-item hashes to avoid re-alerting. */
+export const workflowConditionState = pgTable(
+  'workflow_condition_state',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workflowId: uuid('workflow_id').notNull().references(() => workflows.id, { onDelete: 'cascade' }).unique(),
+    lastCheckedAt: timestamp('last_checked_at', { withTimezone: true }),
+    lastMatchedAt: timestamp('last_matched_at', { withTimezone: true }),
+    cursor: varchar('cursor', { length: 200 }),
+    // Hashes of items already alerted on (bounded), for dedup + cool-down.
+    seenHashes: jsonb('seen_hashes').notNull().$type<string[]>().default([]),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ wfIdx: index('workflow_condition_workflow_idx').on(t.workflowId) }),
+);
+
+export type Workflow = typeof workflows.$inferSelect;
+export type WorkflowVersion = typeof workflowVersions.$inferSelect;
+export type WorkflowTrigger = typeof workflowTriggers.$inferSelect;
+export type WorkflowRun = typeof workflowRuns.$inferSelect;
+export type StandingAuthorization = typeof standingAuthorizations.$inferSelect;
+export type WorkflowNotification = typeof workflowNotifications.$inferSelect;
+export type WorkflowConditionState = typeof workflowConditionState.$inferSelect;
+export type AgentDefinition = typeof agentDefinitions.$inferSelect;

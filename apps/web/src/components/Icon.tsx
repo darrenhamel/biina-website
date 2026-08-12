@@ -67,6 +67,15 @@ const paths: Record<string, JSX.Element> = {
   ),
   shield: <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
   spark: <path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M18 6l-2.5 2.5M8.5 15.5 6 18" />,
+  clock: (
+    <>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 7v5l3 2" />
+    </>
+  ),
+  bell: <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0" />,
+  pause: <path d="M8 5v14M16 5v14" />,
+  play: <path d="M6 4l14 8-14 8z" />,
 };
 
 export function Icon({ name, ...props }: { name: string } & SVGProps<SVGSVGElement>) {

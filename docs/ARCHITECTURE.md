@@ -491,6 +491,71 @@ Details: [`AGENT_ARCHITECTURE.md`](./AGENT_ARCHITECTURE.md) ·
 [`AGENT_AUDITING.md`](./AGENT_AUDITING.md) ·
 [`AGENT_ACTIVATION_CHECKLIST.md`](./AGENT_ACTIVATION_CHECKLIST.md).
 
+## 4i. Workflows, scheduled automations & reusable agents (Phase 12)
+
+Makes a Phase 11 agent run **reusable and schedulable** — without a second engine. A
+workflow is saved *configuration* (goal + trigger + sources + limits + approval
+policy); each run is turned into an ordinary Phase 11 `AgentSession` and passes through
+the same gates. **Scheduling grants no new permissions.** Code:
+`apps/web/src/server/workflows/`.
+
+```
+Workflow (config) + Trigger (when) → WorkflowRun (one attempt)
+   → runner.ts: LIVE authority recheck → build AgentSession → advanceAgentSession
+   → same Phase 11 gauntlet (policy → approval → execute → verify → audit)
+```
+
+- **Config vs. runtime, strictly separate.** `workflows` / `workflow_triggers` /
+  `workflow_versions` hold configuration; `workflow_runs` holds one attempt. A run
+  never rewrites configuration — no tool can edit a workflow, its schedule, its tools,
+  or its approval policy; changes come only from authenticated management APIs.
+- **Ownership, personal XOR org.** `resolveWorkflowAccess` mirrors connector/agent
+  isolation (→ null → 404). Personal workflows run under the owner; **organization**
+  workflows run under the **creator** (`createdByUserId`) with **live membership
+  re-verification + an ACTIVE org**. Org service identities are readiness only (no fake
+  accounts).
+- **Lifecycle.** DRAFT (always, on create) → ACTIVE (validated, plan-entitled,
+  under the active-workflow cap) → PAUSED / AUTO_PAUSED (after N consecutive failures)
+  / ARCHIVED (soft delete). Every transition recomputes `nextRunAt`.
+- **Triggers.** MANUAL · SCHEDULE (once/daily/weekly/monthly, DST-correct via `Intl`,
+  IANA zones, day-31 clamped) · CONDITION (allowlisted, ≥ min interval). WEBHOOK /
+  CONNECTOR_EVENT are reserved (readiness).
+- **DB-authoritative scheduler, no in-memory timers.** An authenticated worker calls
+  `POST /api/internal/workflows/tick` (shared secret `WORKFLOW_TICK_SECRET`, constant-
+  time compare, **no user job payload**, 503 if unset). Each due instant is CLAIMED by
+  a `UNIQUE(workflowId, runKey)` insert so concurrent workers can't double-fire;
+  `nextRunAt` advances idempotently; stuck RUNNING runs are recovered by heartbeat
+  timeout with **no write auto-retry**; missed instants catch up conservatively.
+- **Approvals unchanged — one narrow escape hatch.** Every write still pauses for a
+  human (run persists as `AWAITING_APPROVAL`, worker freed, owner notified; resume is a
+  continuation, not a restart). The **only** unattended write path is a **narrow
+  standing authorization** — bound to workflow + tool + connection + exact destination
+  allowlist + risk ceiling + limits + expiry, creation *is* the explicit approval,
+  consumed **atomically**, live-rechecked, immediately revocable. Scheduled writes also
+  need `WORKFLOW_SCHEDULED_WRITES_ENABLED=true` (**default off**, separate from the
+  Phase 11 write switch).
+- **Live authority every run.** `checkRunnable`: kill switch, plan + scheduled
+  entitlement, owner ACTIVE / org ACTIVE + creator membership, monthly run quota.
+  Credential drift → `REAUTH_REQUIRED` stops + notifies; suspension halts execution.
+- **Bounded + metered.** Per-run step/tool/write/cost caps folded with plan
+  (`maxWorkflowSteps`) and platform hard limits (`WORKFLOW_MAX_HARD_STEPS`, default 20);
+  budget stop ⇒ BLOCKED, quota ⇒ SKIPPED. Run counters roll up steps/tool-calls/writes/
+  estimated cost **without double-counting** Phase 5/10 provider metering. Notifications
+  are provider-independent (in-app + email), deduped by `(user, dedupeKey)`. Additive
+  schema: agent_definitions, workflows, workflow_versions, workflow_triggers,
+  workflow_runs (unique run key), standing_authorizations, workflow_notifications
+  (unique dedupe), workflow_condition_state + plan columns.
+- **What ships.** Scheduled **read** automations run **unattended** end-to-end;
+  scheduled **writes** require **both** a standing authorization **and** the default-off
+  scheduled-writes switch. Readiness only: WEBHOOK/CONNECTOR_EVENT triggers, org service
+  identities, template marketplace, rollback UI.
+
+Details: [`WORKFLOWS.md`](./WORKFLOWS.md) · [`SCHEDULER.md`](./SCHEDULER.md) ·
+[`AUTOMATION_SECURITY.md`](./AUTOMATION_SECURITY.md) ·
+[`WORKFLOW_APPROVALS.md`](./WORKFLOW_APPROVALS.md) ·
+[`WORKFLOW_TEMPLATES.md`](./WORKFLOW_TEMPLATES.md) ·
+[`WORKFLOW_COSTS.md`](./WORKFLOW_COSTS.md).
+
 ### System prompt (server-side, layered)
 
 Assembled entirely on the server (`apps/web/src/server/ai/system-prompt.ts`),

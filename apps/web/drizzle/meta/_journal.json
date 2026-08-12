@@ -71,6 +71,13 @@
       "when": 1786556871580,
       "tag": "0009_agent_engine",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786559085706,
+      "tag": "0010_workflows",
+      "breakpoints": true
     }
   ]
 }

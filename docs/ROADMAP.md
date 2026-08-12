@@ -287,6 +287,61 @@ Legend: ☐ not started · ◐ in progress · ☑ done
   `AGENT_SECURITY.md`, `AGENT_EXECUTION.md`, `AGENT_AUDITING.md`,
   `AGENT_ACTIVATION_CHECKLIST.md`.
 
+## Phase 12 — Workflows, scheduled automations & reusable agents  ☑  *(build prompt — automations track)*
+
+- ☑ **Workflow model** (`store.ts`/`compiler.ts`): config (`workflows` /
+  `workflow_triggers` / `workflow_versions`) kept **strictly separate** from runtime
+  (`workflow_runs`); a run never rewrites configuration. Personal XOR org isolation
+  (`resolveWorkflowAccess` → null → 404); org workflows run under the **creator** with
+  live membership + ACTIVE-org re-check. Lifecycle DRAFT → ACTIVE →
+  PAUSED/AUTO_PAUSED/ARCHIVED; every transition recomputes `nextRunAt`. Versioning
+  snapshots prior config + bumps version (rollback UI = readiness).
+- ☑ **Reuse of the Phase 11 engine, no second engine** (`runner.ts`): turns a
+  `WorkflowRun` into an `AgentSession` and drives `advanceAgentSession`; **every write
+  still pauses for approval**. Failure classification + AUTO_PAUSE after N consecutive
+  failures; `resumeWorkflowRunAfterDecision` continues (not restarts) after a human
+  decision.
+- ☑ **DB-authoritative scheduler** (`scheduler.ts`/`schedule.ts`): no in-memory
+  timers; `tick(workerId)` recovers stuck RUNNING runs (heartbeat timeout, **no write
+  auto-retry**), selects due workflows, **CLAIMS via `UNIQUE(workflowId, runKey)`** so
+  concurrent workers can't double-fire, advances `nextRunAt` idempotently. Timezone/DST
+  correct via `Intl`/ICU (IANA ids), monthly day-31 clamped, conservative missed-run
+  catch-up.
+- ☑ **Worker/tick boundary** (`internal/workflows/tick`): shared-secret
+  (`WORKFLOW_TICK_SECRET`) **constant-time** auth, 503 if unset, **no user job
+  payload** — loads config from DB by trusted id.
+- ☑ **Narrow standing authorizations** (`standing-auth.ts`): the ONLY unattended write
+  path — bound to workflow + tool + connection + exact destination allowlist + risk
+  ceiling + limits + expiry; creation **is** the explicit approval; **atomic**
+  consumption (guarded UPDATE); live recheck + immediate revocation. Scheduled writes
+  also need `WORKFLOW_SCHEDULED_WRITES_ENABLED=true` (**default off**, separate from
+  Phase 11's write switch).
+- ☑ **Live entitlement/authority** (`quotas.ts`): kill switch, plan + scheduled
+  entitlement, owner ACTIVE / org ACTIVE + creator membership, monthly run quota;
+  active-workflow limit on activation.
+- ☑ **Compiler** (`compiler.ts`): `validateWorkflowConfig`; `createWorkflow` (DRAFT +
+  first snapshot); `draftFromNaturalLanguage` (**deterministic heuristics — never
+  executes model JSON**); `activationSummary`. Built-in **templates** (structure only);
+  provider-independent **notifications** (in-app + email, deduped by `(user,
+  dedupeKey)`); admin **automationsOverview** (metadata only).
+- ☑ **Schema + plan columns**: agent_definitions, workflows, workflow_versions,
+  workflow_triggers, workflow_runs (unique run key), standing_authorizations,
+  workflow_notifications (unique dedupe), workflow_condition_state; plan gained
+  `workflowsEnabled`, `maxActiveWorkflows`, `scheduledAutomationsEnabled`,
+  `conditionAutomationsEnabled`, `workflowRunsPerMonth`, `maxWorkflowSteps`,
+  `scheduledWritesEnabled`. Additive migration; security events `workflow.*`.
+- ☑ **APIs**: `workflows` (create/list), `workflows/[id]` (get/patch/archive),
+  `.../activate|pause|resume|run`, `workflows/compile`, `workflows/templates`,
+  `workflows/runs/[runId]` (+`/approve`), `workflows/standing-auth` (+`[id]` revoke),
+  `notifications`, `admin/automations`, and the worker `internal/workflows/tick`.
+- **Deliverable:** scheduled **read** automations that run **unattended** end-to-end,
+  reusing the Phase 11 controls. **Scheduled writes are NOT auto-enabled**: they need
+  **both** a narrow standing authorization **and** `WORKFLOW_SCHEDULED_WRITES_ENABLED=true`
+  (default off) on top of the Phase 11 write switch. Readiness only: WEBHOOK /
+  CONNECTOR_EVENT triggers, org service identities, template marketplace, rollback UI.
+  Docs: `WORKFLOWS.md`, `SCHEDULER.md`, `AUTOMATION_SECURITY.md`,
+  `WORKFLOW_APPROVALS.md`, `WORKFLOW_TEMPLATES.md`, `WORKFLOW_COSTS.md`.
+
 ## Phase 10 — Pre-launch audit  ☐  *(build prompt 8)*
 
 - ☐ Audit all 24 areas; run typecheck / lint / tests / prod build / migration validation / dep-security.

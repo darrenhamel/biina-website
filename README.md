@@ -350,9 +350,43 @@ live write scopes **and** `AGENT_WRITE_ACTIONS_ENABLED=true` and the manual step
 [`docs/AGENT_EXECUTION.md`](./docs/AGENT_EXECUTION.md), and
 [`docs/AGENT_AUDITING.md`](./docs/AGENT_AUDITING.md).
 
+**Added (Phase 12):** **workflows, scheduled automations & reusable agents** —
+BIINA.ai can now run an agent **on a schedule**, unattended, **without becoming
+autonomous**. A workflow is saved *configuration* (goal + trigger + sources + limits +
+approval policy); every run is turned into an ordinary Phase 11 agent run and passes
+through the **same** gates, so **scheduling grants no new permissions**. The
+**database is the authoritative scheduler** (no in-memory timers): a lightweight
+worker calls one shared-secret endpoint (`WORKFLOW_TICK_SECRET`, constant-time,
+**no user job payload**, 503 if unset), each due instant is **claimed by a unique run
+key** so concurrent workers never double-fire, scheduling is **timezone/DST-correct**
+(IANA zones via `Intl`, monthly day-31 clamped), missed runs catch up conservatively,
+and stuck runs recover by heartbeat with **no write auto-retry**. Ownership is personal
+**XOR** org (org workflows run under the creator with live membership + active-org
+re-checks); authority — plan entitlement, quotas, suspension, credentials — is
+re-derived **live at every run**. Every external write **still pauses for a human**;
+the run persists as awaiting-approval (worker freed, owner notified) and resumes as a
+continuation. The **only** unattended write path is a **narrow standing
+authorization** — bound to one workflow + tool + connection + an **exact destination
+allowlist** + risk ceiling + limits + expiry, whose creation *is* the explicit
+approval, consumed atomically and revocable immediately. Real external writes and
+**scheduled writes are OFF by default** and need deliberate activation: a scheduled
+write requires **both** a standing authorization **and**
+`WORKFLOW_SCHEDULED_WRITES_ENABLED=true` (default false) on top of the Phase 11 write
+switch. Natural-language setup produces a **DRAFT** via deterministic heuristics
+(never executed model JSON); built-in templates are structure-only; notifications are
+provider-independent and deduped. See [`docs/WORKFLOWS.md`](./docs/WORKFLOWS.md),
+[`docs/SCHEDULER.md`](./docs/SCHEDULER.md),
+[`docs/AUTOMATION_SECURITY.md`](./docs/AUTOMATION_SECURITY.md),
+[`docs/WORKFLOW_APPROVALS.md`](./docs/WORKFLOW_APPROVALS.md),
+[`docs/WORKFLOW_TEMPLATES.md`](./docs/WORKFLOW_TEMPLATES.md), and
+[`docs/WORKFLOW_COSTS.md`](./docs/WORKFLOW_COSTS.md).
+
 **Deferred:** **real external write actions** (the agent ships write-capable but on
 the mock adapter; real Gmail/Calendar/Slack writes require manual activation),
-standing/pre-authorized actions, automatic compensating actions (undo/rollback),
-**live provider credentials** (Google/Slack ship on the mock connector), live payment
+**scheduled external writes** (off by default; need a standing authorization **and**
+`WORKFLOW_SCHEDULED_WRITES_ENABLED=true`), **event/webhook & connector-event
+triggers**, **org service identities**, a **workflow template marketplace**, a
+**version-rollback UI**, automatic compensating actions (undo/rollback), **live
+provider credentials** (Google/Slack ship on the mock connector), live payment
 activation, marketplace/payouts, a live search-provider key, a caching layer for
 fetched pages, and the pre-launch audit. See [`docs/ROADMAP.md`](./docs/ROADMAP.md).
