@@ -274,6 +274,38 @@ Details: [`AUTHENTICATION.md`](./AUTHENTICATION.md) ·
 [`AUTHORIZATION.md`](./AUTHORIZATION.md) · [`ORGANIZATIONS.md`](./ORGANIZATIONS.md) ·
 [`SECURITY.md`](./SECURITY.md).
 
+## 4d. Payments, subscriptions & commercial plans (Phase 7)
+
+Turns the internal plan architecture into a commercial subscription system —
+**without coupling to a payment vendor** and **without touching the AI stack**.
+
+```
+BIINA app → BillingService → PaymentProvider interface → StripeProvider → Stripe
+```
+
+- **Plan vs. price separation.** A BIINA `plan` (FREE/PRO/…) is the entitlement;
+  a `commercial_price` is a sellable offering with a provider price id. The app
+  never treats a provider price id as a plan id; one plan can have many prices
+  (monthly/annual, AED/USD).
+- **Entitlements follow verified billing state.** A signed, idempotent webhook
+  re-fetches authoritative subscription state → `plan_assignment` (source
+  SUBSCRIPTION/TRIAL/ORGANIZATION) → `recomputeEffectivePlan` →
+  `users.plan`/`organizations.plan_slug` → the **unchanged** Phase 5
+  quota/entitlement/routing. A checkout redirect is never proof of payment.
+- **Server-side ownership.** The browser only references our commercial-price
+  UUID; the server maps it to the approved provider price. No provider
+  customer/subscription/price id is ever trusted from the client.
+- **Stripe adapter** is fetch + `node:crypto` (no SDK), signatures HMAC-verified.
+  A second provider = a new adapter, nothing else changes.
+- **Two safety flags** (`BILLING_ENABLED`, `BILLING_LIVE_MODE`), both default off;
+  live mode never inferred from key presence. Manual admin assignments stay
+  distinct from paid subscriptions. No card data stored (hosted checkout/portal).
+
+Details: [`BILLING_ARCHITECTURE.md`](./BILLING_ARCHITECTURE.md) ·
+[`SUBSCRIPTIONS.md`](./SUBSCRIPTIONS.md) · [`COMMERCIAL_PLANS.md`](./COMMERCIAL_PLANS.md) ·
+[`BILLING_SECURITY.md`](./BILLING_SECURITY.md) · [`STRIPE_SETUP.md`](./STRIPE_SETUP.md) ·
+[`PRODUCTION_BILLING_CHECKLIST.md`](./PRODUCTION_BILLING_CHECKLIST.md).
+
 ### System prompt (server-side, layered)
 
 Assembled entirely on the server (`apps/web/src/server/ai/system-prompt.ts`),

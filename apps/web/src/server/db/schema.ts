@@ -361,12 +361,16 @@ export const planAssignments = pgTable(
   'plan_assignments',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    userId: uuid('user_id')
-      .notNull()
-      .references(() => users.id, { onDelete: 'cascade' }),
+    // Nullable: an ORGANIZATION-scoped assignment has no individual user (Phase 7).
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
     planSlug: varchar('plan_slug', { length: 32 }).notNull(),
     assignedBy: uuid('assigned_by').references(() => users.id, { onDelete: 'set null' }),
     note: varchar('note', { length: 200 }),
+    // Where this entitlement came from — keeps PAID vs MANUAL vs TRIAL distinct
+    // (Phase 7). DEFAULT/MANUAL/TRIAL/SUBSCRIPTION/ORGANIZATION/PROMOTION.
+    source: varchar('source', { length: 24 }).notNull().$type<PlanSource>().default('MANUAL'),
+    // Links a SUBSCRIPTION/TRIAL assignment back to the subscription that drives it.
+    subscriptionId: uuid('subscription_id'),
     // Trial / subscription window readiness. endsAt = null means open-ended.
     startsAt: timestamp('starts_at', { withTimezone: true }).notNull().defaultNow(),
     endsAt: timestamp('ends_at', { withTimezone: true }),
@@ -376,8 +380,12 @@ export const planAssignments = pgTable(
   },
   (t) => ({
     userIdx: index('plan_assignments_user_idx').on(t.userId),
+    sourceIdx: index('plan_assignments_source_idx').on(t.userId, t.source),
   }),
 );
+
+/** Where an entitlement came from — PAID subscriptions stay distinct from MANUAL grants. */
+export type PlanSource = 'DEFAULT' | 'MANUAL' | 'TRIAL' | 'SUBSCRIPTION' | 'ORGANIZATION' | 'PROMOTION';
 
 /**
  * Usage ledger — one row per AI request that reached a provider (success, error,
@@ -569,6 +577,191 @@ export const organizationMembersRelations = relations(organizationMembers, ({ on
   organization: one(organizations, { fields: [organizationMembers.organizationId], references: [organizations.id] }),
   user: one(users, { fields: [organizationMembers.userId], references: [users.id] }),
 }));
+
+// ==========================================================================
+// Phase 7 — payments, subscriptions & commercial plans.
+//
+// SEPARATION OF CONCERNS: a BIINA `plan` (FREE/PRO/…) is the business-domain
+// entitlement (above). A `commercial_price` is a sellable offering with a
+// PROVIDER price id. The app NEVER treats a provider price id as a plan id, and
+// entitlements are only ever granted from webhook-verified provider state.
+// No card data is ever stored here.
+// ==========================================================================
+
+export const billingProviderEnum = pgEnum('billing_provider', ['stripe']);
+export const billingInterval = pgEnum('billing_interval', ['month', 'year']);
+export const subscriptionStatus = pgEnum('subscription_status', [
+  'TRIALING',
+  'ACTIVE',
+  'PAST_DUE',
+  'CANCELED',
+  'INCOMPLETE',
+  'UNPAID',
+  'PAUSED',
+]);
+export const webhookStatus = pgEnum('billing_webhook_status', ['received', 'processed', 'failed']);
+
+/**
+ * Commercial offering: maps a BIINA plan to a provider price. One plan may have
+ * many prices (monthly/annual, AED/USD). `amount` is in the currency's minor
+ * unit (fils/cents). Entitlements come from the plan, never from here.
+ */
+export const commercialPrices = pgTable(
+  'commercial_prices',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    planSlug: varchar('plan_slug', { length: 32 }).notNull(),
+    displayName: varchar('display_name', { length: 120 }).notNull(),
+    billingProvider: billingProviderEnum('billing_provider').notNull().default('stripe'),
+    // The provider's price id (e.g. Stripe price_...). NON-secret, but never a plan id.
+    providerPriceId: varchar('provider_price_id', { length: 255 }).notNull(),
+    currency: varchar('currency', { length: 8 }).notNull(),
+    amount: integer('amount').notNull(), // minor units
+    billingInterval: billingInterval('billing_interval').notNull().default('month'),
+    billingIntervalCount: integer('billing_interval_count').notNull().default(1),
+    // Trial length offered with this price (days); null = no trial.
+    trialDays: integer('trial_days'),
+    // Seat readiness (Business).
+    includedSeats: integer('included_seats'),
+    maxSeats: integer('max_seats'),
+    perSeatBilling: boolean('per_seat_billing').notNull().default(false),
+    enabled: boolean('enabled').notNull().default(true),
+    publiclyAvailable: boolean('publicly_available').notNull().default(true),
+    // Clearly flag non-production placeholder pricing.
+    isTest: boolean('is_test').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    planIdx: index('commercial_prices_plan_idx').on(t.planSlug),
+    providerPriceUniq: unique('commercial_prices_provider_price_uniq').on(t.billingProvider, t.providerPriceId),
+  }),
+);
+
+/**
+ * Internal billing customer — maps a BIINA user OR organization to a provider
+ * customer. Avoids creating duplicate provider customers. No card data.
+ */
+export const billingCustomers = pgTable(
+  'billing_customers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'set null' }),
+    billingProvider: billingProviderEnum('billing_provider').notNull().default('stripe'),
+    providerCustomerId: varchar('provider_customer_id', { length: 255 }).notNull(),
+    email: varchar('email', { length: 320 }),
+    billingName: varchar('billing_name', { length: 200 }),
+    billingCountry: varchar('billing_country', { length: 2 }),
+    // Tax readiness (configurable, never assumed).
+    taxRegistrationNumber: varchar('tax_registration_number', { length: 64 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    providerCustomerUniq: unique('billing_customers_provider_customer_uniq').on(t.billingProvider, t.providerCustomerId),
+    userIdx: index('billing_customers_user_idx').on(t.userId),
+    orgIdx: index('billing_customers_org_idx').on(t.organizationId),
+  }),
+);
+
+/** Internal subscription record — synchronized carefully with provider state. */
+export const subscriptions = pgTable(
+  'subscriptions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'set null' }),
+    planSlug: varchar('plan_slug', { length: 32 }).notNull(),
+    commercialPriceId: uuid('commercial_price_id'),
+    billingProvider: billingProviderEnum('billing_provider').notNull().default('stripe'),
+    providerCustomerId: varchar('provider_customer_id', { length: 255 }),
+    providerSubscriptionId: varchar('provider_subscription_id', { length: 255 }).notNull().unique(),
+    status: subscriptionStatus('status').notNull(),
+    currentPeriodStart: timestamp('current_period_start', { withTimezone: true }),
+    currentPeriodEnd: timestamp('current_period_end', { withTimezone: true }),
+    cancelAtPeriodEnd: boolean('cancel_at_period_end').notNull().default(false),
+    canceledAt: timestamp('canceled_at', { withTimezone: true }),
+    trialStart: timestamp('trial_start', { withTimezone: true }),
+    trialEnd: timestamp('trial_end', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index('subscriptions_user_idx').on(t.userId),
+    orgIdx: index('subscriptions_org_idx').on(t.organizationId),
+    statusIdx: index('subscriptions_status_idx').on(t.status),
+  }),
+);
+
+/** Safe references to provider invoices — never card data. */
+export const billingInvoices = pgTable(
+  'billing_invoices',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    subscriptionId: uuid('subscription_id'),
+    billingCustomerId: uuid('billing_customer_id'),
+    billingProvider: billingProviderEnum('billing_provider').notNull().default('stripe'),
+    providerInvoiceId: varchar('provider_invoice_id', { length: 255 }).notNull().unique(),
+    status: varchar('status', { length: 32 }),
+    currency: varchar('currency', { length: 8 }),
+    subtotal: integer('subtotal'),
+    tax: integer('tax'),
+    total: integer('total'),
+    periodStart: timestamp('period_start', { withTimezone: true }),
+    periodEnd: timestamp('period_end', { withTimezone: true }),
+    invoiceUrl: text('invoice_url'),
+    invoicePdfUrl: text('invoice_pdf_url'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    subIdx: index('billing_invoices_sub_idx').on(t.subscriptionId),
+    customerIdx: index('billing_invoices_customer_idx').on(t.billingCustomerId),
+  }),
+);
+
+/** Webhook event ledger — idempotency (unique on provider event id). */
+export const billingWebhookEvents = pgTable(
+  'billing_webhook_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    billingProvider: billingProviderEnum('billing_provider').notNull().default('stripe'),
+    providerEventId: varchar('provider_event_id', { length: 255 }).notNull().unique(),
+    eventType: varchar('event_type', { length: 120 }).notNull(),
+    status: webhookStatus('status').notNull().default('received'),
+    error: text('error'),
+    receivedAt: timestamp('received_at', { withTimezone: true }).notNull().defaultNow(),
+    processedAt: timestamp('processed_at', { withTimezone: true }),
+  },
+);
+
+/**
+ * Billing configuration singleton — non-secret commercial/tax settings that
+ * admins may edit. Secrets (provider keys) live ONLY in env, never here.
+ */
+export const billingConfig = pgTable('billing_config', {
+  id: varchar('id', { length: 16 }).primaryKey().default('singleton'),
+  defaultCurrency: varchar('default_currency', { length: 8 }).notNull().default('AED'),
+  // Tax config layer — configurable, never assumed correct.
+  taxEnabled: boolean('tax_enabled').notNull().default(false),
+  taxMode: varchar('tax_mode', { length: 24 }).notNull().default('none'), // none | inclusive | exclusive
+  taxInclusive: boolean('tax_inclusive').notNull().default(false),
+  taxRegistrationNumber: varchar('tax_registration_number', { length: 64 }),
+  taxRateReference: varchar('tax_rate_reference', { length: 120 }),
+  // Legal entity readiness (UAE-first).
+  legalEntityName: varchar('legal_entity_name', { length: 200 }),
+  billingCountry: varchar('billing_country', { length: 2 }).default('AE'),
+  supportEmail: varchar('support_email', { length: 320 }),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type CommercialPrice = typeof commercialPrices.$inferSelect;
+export type BillingCustomer = typeof billingCustomers.$inferSelect;
+export type Subscription = typeof subscriptions.$inferSelect;
+export type BillingInvoice = typeof billingInvoices.$inferSelect;
+export type BillingWebhookEvent = typeof billingWebhookEvents.$inferSelect;
+export type BillingConfig = typeof billingConfig.$inferSelect;
+export type SubscriptionStatus = (typeof subscriptionStatus.enumValues)[number];
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;

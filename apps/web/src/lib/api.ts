@@ -37,6 +37,12 @@ export function handleError(err: unknown, context: string) {
       { status: 400 },
     );
   }
+  // Billing-layer errors carry a safe status + message.
+  if (err && typeof err === 'object' && (err as { name?: string }).name === 'BillingError') {
+    const be = err as { status: number; code: string; message: string };
+    if (be.status >= 500) logger.error('api.billing', { context, code: be.code, error: be.message });
+    return NextResponse.json({ error: be.status >= 500 ? 'Billing is temporarily unavailable.' : be.message, code: be.code }, { status: be.status });
+  }
   // Domain/business-rule errors: safe, specific message meant for the client.
   if (isAppError(err)) {
     return NextResponse.json(

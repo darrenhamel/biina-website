@@ -84,7 +84,27 @@ Legend: ☐ not started · ◐ in progress · ☑ done
   rate-limit, validation, email safety) + live IDOR/isolation/suspension smoke.
 - **Deliverable:** multi-tenant identity ready; NO payments, SSO/SAML, or impersonation.
 
-## Phase 7 — Cheap production deploy prep  ☐  *(build prompt 6)*
+## Phase 7 — Payments, subscriptions & commercial plans  ☑  *(build prompt — billing track)*
+
+- ☑ Provider-independent billing abstraction (`BillingService` → `PaymentProvider`);
+  Stripe adapter via fetch + `node:crypto` (no SDK), all server-side.
+- ☑ Plan ↔ commercial-price separation (`commercial_prices`); server maps our
+  price UUID → approved provider price. Multi-currency (AED/USD), monthly/annual.
+- ☑ `billing_customers` / `subscriptions` / `billing_invoices` /
+  `billing_webhook_events` / `billing_config`; `plan_assignments.source` +
+  nullable user (org scope). Migrations 0004/0005 (additive).
+- ☑ Checkout, billing portal, cancel(at-period-end)/resume/change; signature-
+  verified, idempotent, safe-retry webhooks that re-fetch authoritative state.
+- ☑ Entitlements follow verified state (grace/trial/expiry) → Phase 5 quotas
+  unchanged. Manual vs. paid kept distinct (entitlement `source`).
+- ☑ Org billing (owner-only, controlled beta); admin billing overview, MRR/ARR
+  per currency, unit economics, reconciliation; tax config layer.
+- ☑ Two safety flags (`BILLING_ENABLED`/`BILLING_LIVE_MODE`, both off; live never
+  inferred). 28 billing unit tests + 18-check live billing smoke (mock provider).
+- **Deliverable:** commercial-ready in TEST mode. No live charges; live activation
+  gated by `PRODUCTION_BILLING_CHECKLIST.md`. No marketplace/payouts.
+
+## Phase 8 (infra) — Cheap production deploy prep  ☐  *(build prompt 6)*
 
 - ☐ Production Dockerfile(s), `docker-compose.production.yml`, reverse proxy config.
 - ☐ Health checks, restart policies, persistent DB volume, env template.

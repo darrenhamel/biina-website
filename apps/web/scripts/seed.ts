@@ -22,6 +22,8 @@ import {
   aiRoutes,
   aiSettings,
   plans,
+  commercialPrices,
+  billingConfig,
 } from '../src/server/db/schema';
 
 async function main() {
@@ -36,6 +38,7 @@ async function main() {
   await seedUsers(db);
   await seedAiCatalog(db);
   await seedPlans(db);
+  await seedBilling(db);
 
   await sql.end();
   console.log('Seed complete.');
@@ -294,6 +297,47 @@ async function seedPlans(db: DB) {
   await db.update(users).set({ plan: 'ADMIN' }).where(eq(users.email, adminEmail));
 
   console.log('✓ plans seeded (FREE/PRO/BUSINESS/ENTERPRISE/ADMIN)');
+}
+
+/**
+ * Seed commercial prices + billing config. Prices are TEST placeholders unless
+ * real Stripe price ids are provided via env. `isTest: true` marks them clearly
+ * as non-production. Entitlements always come from the plan, never from here.
+ */
+async function seedBilling(db: DB) {
+  // Billing config singleton (UAE-first defaults; tax OFF until verified).
+  await db
+    .insert(billingConfig)
+    .values({ id: 'singleton', defaultCurrency: 'AED', billingCountry: 'AE', taxEnabled: false, taxMode: 'none' })
+    .onConflictDoNothing({ target: billingConfig.id });
+
+  const env = process.env;
+  const rows = [
+    {
+      planSlug: 'PRO', displayName: 'Pro — Monthly', currency: 'AED', amount: 4900, billingInterval: 'month' as const,
+      providerPriceId: env.STRIPE_PRICE_PRO_MONTHLY || 'price_test_pro_monthly_aed', trialDays: 14,
+    },
+    {
+      planSlug: 'PRO', displayName: 'Pro — Annual', currency: 'AED', amount: 49000, billingInterval: 'year' as const,
+      providerPriceId: env.STRIPE_PRICE_PRO_ANNUAL || 'price_test_pro_annual_aed', trialDays: 14,
+    },
+    {
+      planSlug: 'BUSINESS', displayName: 'Business — Monthly', currency: 'AED', amount: 19900, billingInterval: 'month' as const,
+      providerPriceId: env.STRIPE_PRICE_BUSINESS_MONTHLY || 'price_test_business_monthly_aed', includedSeats: 5,
+    },
+    {
+      planSlug: 'BUSINESS', displayName: 'Business — Annual', currency: 'AED', amount: 199000, billingInterval: 'year' as const,
+      providerPriceId: env.STRIPE_PRICE_BUSINESS_ANNUAL || 'price_test_business_annual_aed', includedSeats: 5,
+    },
+  ];
+  const isTest = !(env.BILLING_LIVE_MODE === 'true');
+  for (const r of rows) {
+    await db
+      .insert(commercialPrices)
+      .values({ ...r, isTest, publiclyAvailable: true, enabled: true })
+      .onConflictDoNothing({ target: [commercialPrices.billingProvider, commercialPrices.providerPriceId] });
+  }
+  console.log(`✓ billing seeded (${rows.length} commercial prices${isTest ? ', TEST' : ''})`);
 }
 
 main().catch((err) => {

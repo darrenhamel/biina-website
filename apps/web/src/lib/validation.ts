@@ -169,6 +169,54 @@ export const setOrgStatusSchema = z.object({
   reason: z.string().trim().max(280).optional(),
 });
 
+// ---- Phase 7: billing ----
+
+export const checkoutSchema = z.object({ commercialPriceId: z.string().uuid() });
+export const cancelSubSchema = z.object({
+  subscriptionId: z.string().uuid(),
+  atPeriodEnd: z.boolean().optional().default(true),
+});
+export const resumeSubSchema = z.object({ subscriptionId: z.string().uuid() });
+export const changeSubSchema = z.object({
+  subscriptionId: z.string().uuid(),
+  commercialPriceId: z.string().uuid(),
+});
+
+export const upsertCommercialPriceSchema = z
+  .object({
+    planSlug: z.enum(['FREE', 'PRO', 'BUSINESS', 'ENTERPRISE', 'ADMIN']),
+    displayName: z.string().trim().min(1).max(120),
+    providerPriceId: z.string().trim().min(1).max(255),
+    currency: z.string().trim().length(3).toUpperCase(),
+    amount: z.number().int().min(0).max(100_000_000),
+    billingInterval: z.enum(['month', 'year']).default('month'),
+    billingIntervalCount: z.number().int().min(1).max(12).default(1),
+    trialDays: z.number().int().min(0).max(365).nullable().optional(),
+    includedSeats: z.number().int().min(0).max(100_000).nullable().optional(),
+    maxSeats: z.number().int().min(0).max(100_000).nullable().optional(),
+    perSeatBilling: z.boolean().optional(),
+    enabled: z.boolean().optional(),
+    publiclyAvailable: z.boolean().optional(),
+    isTest: z.boolean().optional(),
+  })
+  .strict();
+
+export const updateCommercialPriceSchema = upsertCommercialPriceSchema.partial().strict();
+
+export const billingConfigSchema = z
+  .object({
+    defaultCurrency: z.string().trim().length(3).toUpperCase().optional(),
+    taxEnabled: z.boolean().optional(),
+    taxMode: z.enum(['none', 'inclusive', 'exclusive']).optional(),
+    taxInclusive: z.boolean().optional(),
+    taxRegistrationNumber: z.string().trim().max(64).nullable().optional(),
+    taxRateReference: z.string().trim().max(120).nullable().optional(),
+    legalEntityName: z.string().trim().max(200).nullable().optional(),
+    billingCountry: z.string().trim().length(2).toUpperCase().nullable().optional(),
+    supportEmail: emailSchema.nullable().optional(),
+  })
+  .strict();
+
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ChatRequestInput = z.infer<typeof chatRequestSchema>;

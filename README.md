@@ -244,5 +244,28 @@ pages. See [`docs/USAGE_METERING.md`](./docs/USAGE_METERING.md),
 [`docs/PLANS_AND_ENTITLEMENTS.md`](./docs/PLANS_AND_ENTITLEMENTS.md), and
 [`docs/COST_CONTROLS.md`](./docs/COST_CONTROLS.md).
 
-**Deferred:** payments/subscriptions, auth hardening & organizations (later phases).
+**Added (Phase 6):** **authentication hardening, user management & organizations.**
+Central permission service (platform roles USER/ADMIN/SUPER_ADMIN, distinct from
+org roles OWNER/ADMIN/MEMBER), rate-limited auth flows, single-use hashed
+verify/reset tokens, session management, account status, IDOR-safe multi-tenant
+organizations + invitations, provider-independent email, CSRF/HSTS. See
+[`docs/AUTHENTICATION.md`](./docs/AUTHENTICATION.md),
+[`docs/AUTHORIZATION.md`](./docs/AUTHORIZATION.md),
+[`docs/ORGANIZATIONS.md`](./docs/ORGANIZATIONS.md), and
+[`docs/SECURITY.md`](./docs/SECURITY.md).
+
+**Added (Phase 7):** **payments, subscriptions & commercial plans (test mode).** A
+provider-independent billing abstraction (`BillingService` → `PaymentProvider` →
+Stripe), plan-vs-price separation, checkout/portal/cancel/resume, signature-
+verified idempotent webhooks, entitlements that follow verified billing state
+(driving the unchanged Phase 5 quotas), org billing readiness, and admin revenue /
+unit-economics reporting. Two safety flags keep it off by default; live charges
+require completing [`docs/PRODUCTION_BILLING_CHECKLIST.md`](./docs/PRODUCTION_BILLING_CHECKLIST.md).
+See [`docs/BILLING_ARCHITECTURE.md`](./docs/BILLING_ARCHITECTURE.md),
+[`docs/SUBSCRIPTIONS.md`](./docs/SUBSCRIPTIONS.md),
+[`docs/COMMERCIAL_PLANS.md`](./docs/COMMERCIAL_PLANS.md),
+[`docs/BILLING_SECURITY.md`](./docs/BILLING_SECURITY.md), and
+[`docs/STRIPE_SETUP.md`](./docs/STRIPE_SETUP.md).
+
+**Deferred:** live payment activation, marketplace/payouts, and later phases.
 See [`docs/ROADMAP.md`](./docs/ROADMAP.md).
