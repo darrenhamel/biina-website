@@ -70,7 +70,19 @@ function snap(parts: {
     providers: parts.providers,
     models: parts.models,
     routes: { persona: {}, workload: {}, plan: {}, ...parts.routes },
-    settings: { defaultModelId: null, fallbackEnabled: false, fallbackModelId: null, maintenanceMode: false, ...parts.settings },
+    settings: {
+      defaultModelId: null,
+      fallbackEnabled: false,
+      fallbackModelId: null,
+      maintenanceMode: false,
+      currency: 'USD',
+      dailyCostWarn: null,
+      dailyCostHardLimit: null,
+      monthlyCostWarn: null,
+      monthlyCostHardLimit: null,
+      hardLimitEnabled: false,
+      ...parts.settings,
+    },
     loadedAt: 0,
   };
 }

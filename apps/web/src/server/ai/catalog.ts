@@ -24,6 +24,13 @@ export interface SettingsSnapshot {
   fallbackEnabled: boolean;
   fallbackModelId: string | null;
   maintenanceMode: boolean;
+  // Phase 5 — budget thresholds.
+  currency: string;
+  dailyCostWarn: number | null;
+  dailyCostHardLimit: number | null;
+  monthlyCostWarn: number | null;
+  monthlyCostHardLimit: number | null;
+  hardLimitEnabled: boolean;
 }
 
 export interface AiConfigSnapshot {
@@ -67,6 +74,12 @@ async function readAiConfig(): Promise<AiConfigSnapshot> {
     fallbackEnabled: s?.fallbackEnabled ?? false,
     fallbackModelId: s?.fallbackModelId ?? null,
     maintenanceMode: s?.maintenanceMode ?? false,
+    currency: s?.currency ?? 'USD',
+    dailyCostWarn: s?.dailyCostWarn ?? null,
+    dailyCostHardLimit: s?.dailyCostHardLimit ?? null,
+    monthlyCostWarn: s?.monthlyCostWarn ?? null,
+    monthlyCostHardLimit: s?.monthlyCostHardLimit ?? null,
+    hardLimitEnabled: s?.hardLimitEnabled ?? false,
   };
 
   return { providers, models, routes, settings, loadedAt: Date.now() };

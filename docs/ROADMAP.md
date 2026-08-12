@@ -55,11 +55,13 @@ Legend: ☐ not started · ◐ in progress · ☑ done
 - ☑ Routing/audit logging; `plan` column + plan/persona/sovereign readiness fields.
 - ☑ Migration `0001` + seed catalog; routing unit tests + live authz/mutation checks.
 
-## Phase 5 — Usage metering, plans & cost controls  ☐  *(build prompt 5 — metering track)*
+## Phase 5 — Usage metering, plans & cost controls  ☑  *(build prompt 5 — metering track)*
 
-- ☐ `usage_events` + entitlement/metering service; check entitlement before a provider call.
-- ☐ Plan limits (Free / Pro / …), configurable daily/monthly caps. No payments.
-- ☐ Persist usage from the gateway's usage metadata; admin usage views. Tests + docs.
+- ☑ `usage_events` ledger (idempotent, no content) + `plans` + `plan_assignments`; cost fields on models; budget fields on settings. Migration `0002` + indexes.
+- ☑ Pure services: cost, entitlements, quota (day/month/minute), budget (soft/hard), concurrency.
+- ☑ Preflight (entitlement → context → budget → quota → concurrency) before any provider call; post-generation ledger write in the service `finally` (survives Stop/error/fallback).
+- ☑ Plans FREE→ADMIN (ADMIN = entitlement, not bypass); output caps to providers; user Usage page; admin Usage & Cost + Plans pages; plan assignment + budget APIs (audited).
+- ☑ 18 metering unit tests + live checks (ledger write, rate-limit 429, budget hard-block 503 with admin still reachable, plan assign, authz). No payments.
 
 ## Phase 7 — Cheap production deploy prep  ☐  *(build prompt 6)*
 

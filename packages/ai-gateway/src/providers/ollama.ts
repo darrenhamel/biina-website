@@ -68,7 +68,13 @@ export class OllamaProvider implements AIProvider {
           messages: req.messages.map((m) => ({ role: m.role, content: m.content })),
           stream: true,
           options:
-            req.temperature !== undefined ? { temperature: req.temperature } : undefined,
+            req.temperature !== undefined || req.maxOutputTokens !== undefined
+              ? {
+                  ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
+                  // Ollama caps generated tokens via num_predict.
+                  ...(req.maxOutputTokens !== undefined ? { num_predict: req.maxOutputTokens } : {}),
+                }
+              : undefined,
         }),
         signal: controller.signal,
       });

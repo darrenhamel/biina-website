@@ -34,6 +34,7 @@ export function streamChatRoute(params: {
   messages: ChatMessage[];
   requestId: string;
   temperature?: number;
+  maxOutputTokens?: number;
   signal?: AbortSignal;
 }): { stream: AsyncIterable<ChatChunk>; provider: string } {
   const provider = getProvider(params.providerType);
@@ -42,6 +43,7 @@ export function streamChatRoute(params: {
     messages: params.messages,
     requestId: params.requestId,
     temperature: params.temperature,
+    maxOutputTokens: params.maxOutputTokens,
     signal: params.signal,
     stream: true,
   });

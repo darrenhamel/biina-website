@@ -91,6 +91,51 @@ export const updateRoutingSchema = z
   })
   .strict();
 
+const nullableInt = z.number().int().min(0).max(1_000_000_000).nullable();
+
+export const updatePlanSchema = z
+  .object({
+    displayName: z.string().trim().min(1).max(80).optional(),
+    enabled: z.boolean().optional(),
+    dailyRequestLimit: nullableInt.optional(),
+    monthlyRequestLimit: nullableInt.optional(),
+    dailyTokenLimit: nullableInt.optional(),
+    monthlyTokenLimit: nullableInt.optional(),
+    requestsPerMinute: nullableInt.optional(),
+    maxConcurrent: nullableInt.optional(),
+    maxContextTokens: nullableInt.optional(),
+    maxOutputTokens: nullableInt.optional(),
+    allowedModels: z.array(z.string().max(64)).optional(),
+    allowedWorkloads: z.array(z.string().max(32)).optional(),
+    allowedPersonas: z.array(z.string().max(32)).optional(),
+    filesEligible: z.boolean().optional(),
+    toolsEligible: z.boolean().optional(),
+    webSearchEligible: z.boolean().optional(),
+    priorityClass: z.number().int().min(0).max(10_000).optional(),
+  })
+  .strict();
+
+export const assignPlanSchema = z
+  .object({
+    plan: z.enum(['FREE', 'PRO', 'BUSINESS', 'ENTERPRISE', 'ADMIN']),
+    note: z.string().trim().max(200).optional(),
+    endsAt: z.string().datetime().nullable().optional(),
+  })
+  .strict();
+
+const nullableCost = z.number().min(0).max(1_000_000).nullable();
+
+export const updateBudgetSchema = z
+  .object({
+    currency: z.string().trim().max(8).optional(),
+    dailyCostWarn: nullableCost.optional(),
+    dailyCostHardLimit: nullableCost.optional(),
+    monthlyCostWarn: nullableCost.optional(),
+    monthlyCostHardLimit: nullableCost.optional(),
+    hardLimitEnabled: z.boolean().optional(),
+  })
+  .strict();
+
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ChatRequestInput = z.infer<typeof chatRequestSchema>;

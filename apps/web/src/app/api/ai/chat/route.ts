@@ -77,7 +77,8 @@ export async function POST(req: NextRequest) {
       const ge = toGatewayError(err, meta.provider || 'routing');
       if (ge.code === 'cancelled') return new NextResponse(null, { status: 499 });
       return NextResponse.json(
-        { error: ge.userMessage(), code: ge.code, requestId },
+        // `data` carries non-secret client hints (e.g. quota resetAt), when present.
+        { error: ge.userMessage(), code: ge.code, requestId, ...(ge.data ? { data: ge.data } : {}) },
         { status: ge.httpStatus() },
       );
     }

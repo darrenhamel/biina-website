@@ -1,7 +1,7 @@
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq } from 'drizzle-orm';
 import { getProvider } from '@biina/ai-gateway';
 import { getDb } from '@/server/db';
-import { aiProviders, aiModels, aiRoutes, aiSettings } from '@/server/db/schema';
+import { aiProviders, aiModels, aiRoutes, aiSettings, users } from '@/server/db/schema';
 import type { AiModel } from '@/server/db/schema';
 import { invalidateAiConfig, loadAiConfig } from './catalog';
 import { validateConfig } from './routing';
@@ -254,6 +254,60 @@ export async function updateRouting(patch: Record<string, unknown>, adminUserId:
     newValue: { settings: settingsSet, personaRoutes: patch.personaRoutes, workloadRoutes: patch.workloadRoutes, planRoutes: patch.planRoutes },
   });
   return { ok: true };
+}
+
+/** Update platform budget thresholds (ai_settings singleton). */
+export async function updateBudget(patch: Record<string, unknown>, adminUserId: string) {
+  const db = getDb();
+  const [prev] = await db.select().from(aiSettings).where(eq(aiSettings.id, SETTINGS_ID)).limit(1);
+  const set: Record<string, unknown> = { updatedAt: new Date() };
+  for (const key of [
+    'currency',
+    'dailyCostWarn',
+    'dailyCostHardLimit',
+    'monthlyCostWarn',
+    'monthlyCostHardLimit',
+    'hardLimitEnabled',
+  ] as const) {
+    if (patch[key] !== undefined) set[key] = patch[key];
+  }
+  await db
+    .insert(aiSettings)
+    .values({ id: SETTINGS_ID, ...set })
+    .onConflictDoUpdate({ target: aiSettings.id, set });
+  invalidateAiConfig();
+  await writeAudit({
+    adminUserId,
+    action: 'budget.update',
+    targetType: 'budget',
+    targetId: 'global',
+    previousValue: prev
+      ? {
+          dailyCostWarn: prev.dailyCostWarn,
+          dailyCostHardLimit: prev.dailyCostHardLimit,
+          monthlyCostWarn: prev.monthlyCostWarn,
+          monthlyCostHardLimit: prev.monthlyCostHardLimit,
+          hardLimitEnabled: prev.hardLimitEnabled,
+        }
+      : null,
+    newValue: set,
+  });
+  return { ok: true };
+}
+
+/** List users with their plan (for admin plan assignment). No secrets/content. */
+export async function listUsers(limit = 100) {
+  return getDb()
+    .select({
+      id: users.id,
+      email: users.email,
+      role: users.role,
+      plan: users.plan,
+      createdAt: users.createdAt,
+    })
+    .from(users)
+    .orderBy(desc(users.createdAt))
+    .limit(limit);
 }
 
 function pickAudit(row: Record<string, unknown>, keys: string[]): Record<string, unknown> {

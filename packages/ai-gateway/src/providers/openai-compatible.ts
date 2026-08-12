@@ -87,6 +87,7 @@ export class OpenAICompatibleProvider implements AIProvider {
       // Ask compatible servers (vLLM, OpenAI) to emit a final usage chunk.
       stream_options: { include_usage: true },
       ...(req.temperature !== undefined ? { temperature: req.temperature } : {}),
+      ...(req.maxOutputTokens !== undefined ? { max_tokens: req.maxOutputTokens } : {}),
     });
 
     let res: Response;

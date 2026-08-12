@@ -40,6 +40,7 @@ const en = {
     settings: 'Settings',
     account: 'Account',
     admin: 'Admin',
+    usage: 'Usage',
   },
   landing: {
     heroTitle: 'The AI platform, built Arabic-first.',
@@ -105,6 +106,22 @@ const en = {
     restricted: 'You need administrator access to view this area.',
     aiControl: 'AI Control',
     aiControlSub: 'Models, providers, routing, and fallback.',
+    usageCost: 'Usage & Cost',
+    usageCostSub: 'Requests, tokens, estimated cost, and budgets.',
+    plans: 'Plans',
+    plansSub: 'Plan limits and user assignments.',
+  },
+  usage: {
+    title: 'Usage',
+    yourPlan: 'Your plan',
+    thisMonth: 'This month',
+    today: 'Today',
+    requests: 'Requests',
+    tokens: 'AI usage',
+    remaining: 'Remaining',
+    unlimited: 'Unlimited',
+    resets: 'Resets',
+    ofLimit: 'of',
   },
 };
 
@@ -142,6 +159,7 @@ const ar: Dictionary = {
     settings: 'الإعدادات',
     account: 'الحساب',
     admin: 'الإدارة',
+    usage: 'الاستخدام',
   },
   landing: {
     heroTitle: 'منصّة الذكاء الاصطناعي، مبنيّة على العربية أولًا.',
@@ -207,6 +225,22 @@ const ar: Dictionary = {
     restricted: 'تحتاج إلى صلاحية مسؤول لعرض هذه المنطقة.',
     aiControl: 'التحكم بالذكاء الاصطناعي',
     aiControlSub: 'النماذج والمزوّدون والتوجيه والاحتياط.',
+    usageCost: 'الاستخدام والتكلفة',
+    usageCostSub: 'الطلبات والرموز والتكلفة التقديرية والميزانيات.',
+    plans: 'الخطط',
+    plansSub: 'حدود الخطط وتعييناتها للمستخدمين.',
+  },
+  usage: {
+    title: 'الاستخدام',
+    yourPlan: 'خطتك',
+    thisMonth: 'هذا الشهر',
+    today: 'اليوم',
+    requests: 'الطلبات',
+    tokens: 'استخدام الذكاء الاصطناعي',
+    remaining: 'المتبقّي',
+    unlimited: 'غير محدود',
+    resets: 'يُعاد الضبط',
+    ofLimit: 'من',
   },
 };
 

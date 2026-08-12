@@ -13,17 +13,31 @@ export type GatewayErrorCode =
   | 'cancelled' // the caller aborted the request
   | 'invalid_config' // misconfiguration (unknown provider, missing base URL, etc.)
   | 'bad_response' // provider returned an unexpected/unparseable payload
+  // Phase 5 — entitlement / metering / budget (pre-generation checks).
+  | 'not_entitled' // the user's plan does not permit this model/workload/persona/feature
+  | 'quota_exceeded' // daily/monthly request or token allowance reached
+  | 'rate_limited' // too many requests per minute or too many concurrent generations
+  | 'context_too_large' // input exceeds the plan's allowed context size
+  | 'budget_exceeded' // platform hard cost limit reached
   | 'unknown';
 
 export class GatewayError extends Error {
   readonly code: GatewayErrorCode;
   readonly provider?: string;
+  /** Optional non-secret data for the client (e.g. quota resetAt / remaining). */
+  readonly data?: Record<string, unknown>;
 
-  constructor(code: GatewayErrorCode, message: string, provider?: string, options?: { cause?: unknown }) {
+  constructor(
+    code: GatewayErrorCode,
+    message: string,
+    provider?: string,
+    options?: { cause?: unknown; data?: Record<string, unknown> },
+  ) {
     super(message, options);
     this.name = 'GatewayError';
     this.code = code;
     this.provider = provider;
+    this.data = options?.data;
   }
 
   /** Safe, generic message suitable for end users (no infra detail). */
@@ -36,6 +50,16 @@ export class GatewayError extends Error {
         return 'The AI model is not available right now. Please try again shortly.';
       case 'cancelled':
         return 'The request was cancelled.';
+      case 'not_entitled':
+        return 'Your plan does not include this. Upgrade to unlock it.';
+      case 'quota_exceeded':
+        return "You've reached your usage limit for now. It resets soon.";
+      case 'rate_limited':
+        return "You're sending requests too quickly or have too many running. Please wait a moment.";
+      case 'context_too_large':
+        return 'This conversation is too long for your plan. Start a new chat or shorten it.';
+      case 'budget_exceeded':
+        return 'The AI service is temporarily unavailable. Please try again later.';
       case 'invalid_config':
         return 'The AI service is not configured correctly.';
       case 'bad_response':
@@ -51,9 +75,17 @@ export class GatewayError extends Error {
       case 'provider_unavailable':
       case 'timeout':
       case 'model_unavailable':
+      case 'budget_exceeded':
         return 503;
       case 'cancelled':
         return 499; // client closed request (nginx convention)
+      case 'not_entitled':
+        return 403;
+      case 'quota_exceeded':
+      case 'rate_limited':
+        return 429;
+      case 'context_too_large':
+        return 413;
       case 'invalid_config':
         return 500;
       default:

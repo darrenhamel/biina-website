@@ -21,6 +21,7 @@ import {
   aiModels,
   aiRoutes,
   aiSettings,
+  plans,
 } from '../src/server/db/schema';
 
 async function main() {
@@ -34,6 +35,7 @@ async function main() {
 
   await seedUsers(db);
   await seedAiCatalog(db);
+  await seedPlans(db);
 
   await sql.end();
   console.log('Seed complete.');
@@ -183,7 +185,110 @@ async function seedAiCatalog(db: DB) {
     ])
     .onConflictDoNothing({ target: [aiRoutes.scope, aiRoutes.scopeKey] });
 
+  // Cost metadata (PLACEHOLDER values — NOT real provider prices). Applied via
+  // update so re-running the seed keeps them in sync even if models pre-existed.
+  const costs: Record<string, { in: number | null; out: number | null; class: 'VERY_LOW' | 'LOW' | 'MEDIUM' | 'HIGH' | 'PREMIUM' }> = {
+    biina: { in: 0.2, out: 0.6, class: 'MEDIUM' },
+    'biina-fast': { in: 0.05, out: 0.1, class: 'VERY_LOW' },
+    'biina-reason': { in: 0.5, out: 1.5, class: 'HIGH' },
+    'biina-local': { in: 0.02, out: 0.02, class: 'LOW' },
+  };
+  for (const [slug, c] of Object.entries(costs)) {
+    await db
+      .update(aiModels)
+      .set({
+        inputCostPerMillion: c.in,
+        outputCostPerMillion: c.out,
+        costClass: c.class,
+        costCurrency: 'USD',
+        costSource: 'seed-placeholder',
+        costUpdatedAt: new Date(0),
+      })
+      .where(eq(aiModels.slug, slug));
+  }
+
   console.log(`✓ AI catalog seeded (flagship provider: ${flagship.provider})`);
+}
+
+async function seedPlans(db: DB) {
+  // Placeholder allowances — INITIAL configuration, not final commercial pricing.
+  // null = unlimited for that dimension. Admins edit these in Admin → Plans.
+  const rows = [
+    {
+      slug: 'FREE',
+      displayName: 'Free',
+      dailyRequestLimit: 50,
+      monthlyRequestLimit: 500,
+      dailyTokenLimit: 100_000,
+      monthlyTokenLimit: 1_000_000,
+      requestsPerMinute: 5,
+      maxConcurrent: 1,
+      maxContextTokens: 8_000,
+      maxOutputTokens: 1_024,
+      priorityClass: 100,
+    },
+    {
+      slug: 'PRO',
+      displayName: 'Pro',
+      dailyRequestLimit: 500,
+      monthlyRequestLimit: 10_000,
+      dailyTokenLimit: 2_000_000,
+      monthlyTokenLimit: 30_000_000,
+      requestsPerMinute: 20,
+      maxConcurrent: 3,
+      maxContextTokens: 32_000,
+      maxOutputTokens: 4_096,
+      priorityClass: 50,
+    },
+    {
+      slug: 'BUSINESS',
+      displayName: 'Business',
+      dailyRequestLimit: 5_000,
+      monthlyRequestLimit: 100_000,
+      dailyTokenLimit: 20_000_000,
+      monthlyTokenLimit: 300_000_000,
+      requestsPerMinute: 60,
+      maxConcurrent: 8,
+      maxContextTokens: 64_000,
+      maxOutputTokens: 8_192,
+      priorityClass: 20,
+    },
+    {
+      slug: 'ENTERPRISE',
+      displayName: 'Enterprise',
+      dailyRequestLimit: null,
+      monthlyRequestLimit: null,
+      dailyTokenLimit: null,
+      monthlyTokenLimit: null,
+      requestsPerMinute: 120,
+      maxConcurrent: 20,
+      maxContextTokens: 128_000,
+      maxOutputTokens: 16_384,
+      priorityClass: 10,
+    },
+    {
+      // ADMIN entitlement is expressed through the plan (no unsafe code bypasses):
+      // everything unlimited.
+      slug: 'ADMIN',
+      displayName: 'Admin',
+      dailyRequestLimit: null,
+      monthlyRequestLimit: null,
+      dailyTokenLimit: null,
+      monthlyTokenLimit: null,
+      requestsPerMinute: null,
+      maxConcurrent: null,
+      maxContextTokens: null,
+      maxOutputTokens: null,
+      priorityClass: 0,
+    },
+  ];
+  await db.insert(plans).values(rows).onConflictDoNothing({ target: plans.slug });
+
+  // Give the seeded admin the ADMIN plan (entitlement via plan, not a bypass).
+  const adminEmail = process.env.SEED_ADMIN_EMAIL || 'admin@biina.local';
+  await db.update(users).set({ plan: 'ADMIN' }).where(eq(users.email, adminEmail));
+
+  console.log('✓ plans seeded (FREE/PRO/BUSINESS/ENTERPRISE/ADMIN)');
 }
 
 main().catch((err) => {

@@ -236,4 +236,13 @@ a user model selector (BIINA names only), routing/audit logging, and a `plan`
 column for future tiers. See [`docs/MODEL_ROUTING.md`](./docs/MODEL_ROUTING.md) and
 [`docs/AI_CONTROL_PLANE.md`](./docs/AI_CONTROL_PLANE.md).
 
-**Deferred:** usage metering, plans & cost controls (Phase 5). See [`docs/ROADMAP.md`](./docs/ROADMAP.md).
+**Added (Phase 5):** **usage metering, plans & cost controls** (no payments). A
+provider-independent usage ledger (`usage_events`), pre-generation entitlement +
+quota + rate/concurrency + hard-budget checks, per-model cost estimation, DB-backed
+plans (FREE→ADMIN) with a user **Usage** page and admin **Usage & Cost** + **Plans**
+pages. See [`docs/USAGE_METERING.md`](./docs/USAGE_METERING.md),
+[`docs/PLANS_AND_ENTITLEMENTS.md`](./docs/PLANS_AND_ENTITLEMENTS.md), and
+[`docs/COST_CONTROLS.md`](./docs/COST_CONTROLS.md).
+
+**Deferred:** payments/subscriptions, auth hardening & organizations (later phases).
+See [`docs/ROADMAP.md`](./docs/ROADMAP.md).

@@ -256,6 +256,7 @@ function AccountMenu({
               <p className="truncate text-xs text-ink-faint">{user.email}</p>
             </div>
             <MenuLink href={`/${locale}/app/account`} icon="user" label={dict.nav.account} onClick={() => setOpen(false)} />
+            <MenuLink href={`/${locale}/app/usage`} icon="spark" label={dict.nav.usage} onClick={() => setOpen(false)} />
             <MenuLink href={`/${locale}/app/settings`} icon="settings" label={dict.nav.settings} onClick={() => setOpen(false)} />
             {user.role === 'ADMIN' && (
               <MenuLink href={`/${locale}/app/admin`} icon="shield" label={dict.nav.admin} onClick={() => setOpen(false)} />

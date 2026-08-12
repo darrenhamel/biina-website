@@ -65,22 +65,29 @@ export default async function AdminPage({ params }: { params: { locale: string }
           ))}
         </div>
 
-        <Link
-          href={`/${locale}/app/admin/ai`}
-          className="card mt-4 flex items-center justify-between p-5 transition-colors hover:border-accent"
-        >
-          <span className="flex items-center gap-3">
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-accent-soft text-accent">
-              <Icon name="spark" />
-            </span>
-            <span>
-              <span className="block font-semibold text-ink">{dict.admin.aiControl}</span>
-              <span className="block text-sm text-ink-soft">{dict.admin.aiControlSub}</span>
-            </span>
-          </span>
-          <Icon name="send" width={18} height={18} />
-        </Link>
+        <div className="mt-4 grid gap-3">
+          <AdminLink href={`/${locale}/app/admin/ai`} icon="spark" title={dict.admin.aiControl} sub={dict.admin.aiControlSub} />
+          <AdminLink href={`/${locale}/app/admin/usage`} icon="discover" title={dict.admin.usageCost} sub={dict.admin.usageCostSub} />
+          <AdminLink href={`/${locale}/app/admin/plans`} icon="templates" title={dict.admin.plans} sub={dict.admin.plansSub} />
+        </div>
       </div>
     </div>
+  );
+}
+
+function AdminLink({ href, icon, title, sub }: { href: string; icon: string; title: string; sub: string }) {
+  return (
+    <Link href={href} className="card flex items-center justify-between p-5 transition-colors hover:border-accent">
+      <span className="flex items-center gap-3">
+        <span className="grid h-10 w-10 place-items-center rounded-xl bg-accent-soft text-accent">
+          <Icon name={icon} />
+        </span>
+        <span>
+          <span className="block font-semibold text-ink">{title}</span>
+          <span className="block text-sm text-ink-soft">{sub}</span>
+        </span>
+      </span>
+      <Icon name="send" width={18} height={18} />
+    </Link>
   );
 }

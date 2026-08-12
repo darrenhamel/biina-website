@@ -156,6 +156,9 @@ export const messagesRelations = relations(messages, ({ one }) => ({
 export const providerType = pgEnum('ai_provider_type', ['mock', 'ollama', 'openai-compatible']);
 export const healthStatus = pgEnum('ai_health_status', ['unknown', 'ok', 'degraded', 'error']);
 export const routeScope = pgEnum('ai_route_scope', ['persona', 'workload', 'plan']);
+// Phase 5 — metering enums.
+export const costClass = pgEnum('ai_cost_class', ['VERY_LOW', 'LOW', 'MEDIUM', 'HIGH', 'PREMIUM']);
+export const usageStatus = pgEnum('ai_usage_status', ['success', 'error', 'cancelled', 'timeout']);
 
 /** Providers — infrastructure endpoints. No secrets stored; env holds those. */
 export const aiProviders = pgTable('ai_providers', {
@@ -180,6 +183,8 @@ export const aiProviders = pgTable('ai_providers', {
   supportsChat: boolean('supports_chat').notNull().default(true),
   supportsTools: boolean('supports_tools').notNull().default(false),
   supportsVision: boolean('supports_vision').notNull().default(false),
+  // Optional per-provider monthly internal-cost budget (readiness; not enforced yet).
+  monthlyBudget: real('monthly_budget'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
@@ -212,10 +217,23 @@ export const aiModels = pgTable(
     contextWindow: integer('context_window'),
     maxOutputTokens: integer('max_output_tokens'),
     priority: integer('priority').notNull().default(100),
-    // Cost readiness (optional; not exposed to normal users).
+    // Phase 4 readiness fields (retained for compatibility; superseded by the
+    // Phase 5 cost model below).
     estimatedInputCost: real('estimated_input_cost'),
     estimatedOutputCost: real('estimated_output_cost'),
     infraCostClass: varchar('infra_cost_class', { length: 24 }),
+    // Cost model (Phase 5) — internal estimates only, NEVER shown to users.
+    // Token pricing is per 1,000,000 tokens; fixedRequestCost is per request.
+    inputCostPerMillion: real('input_cost_per_million'),
+    outputCostPerMillion: real('output_cost_per_million'),
+    fixedRequestCost: real('fixed_request_cost'),
+    costCurrency: varchar('cost_currency', { length: 8 }).notNull().default('USD'),
+    // Qualitative class for GPU/self-hosted models where per-token cost is unknown.
+    costClass: costClass('cost_class'),
+    costSource: varchar('cost_source', { length: 64 }),
+    costUpdatedAt: timestamp('cost_updated_at', { withTimezone: true }),
+    // Optional per-model monthly internal-cost ceiling (readiness; not enforced yet).
+    monthlyBudget: real('monthly_budget'),
     // Latency readiness (populated opportunistically from metrics).
     avgLatencyMs: integer('avg_latency_ms'),
     avgTtftMs: integer('avg_ttft_ms'),
@@ -256,6 +274,14 @@ export const aiSettings = pgTable('ai_settings', {
   fallbackModelId: uuid('fallback_model_id').references(() => aiModels.id, { onDelete: 'set null' }),
   // Optional global maintenance switch (blocks all AI with a clear admin error).
   maintenanceMode: boolean('maintenance_mode').notNull().default(false),
+  // Phase 5 — platform-wide budget controls (soft warnings + optional hard limit).
+  currency: varchar('currency', { length: 8 }).notNull().default('USD'),
+  dailyCostWarn: real('daily_cost_warn'),
+  dailyCostHardLimit: real('daily_cost_hard_limit'),
+  monthlyCostWarn: real('monthly_cost_warn'),
+  monthlyCostHardLimit: real('monthly_cost_hard_limit'),
+  // Hard limit is OFF unless explicitly enabled by an admin.
+  hardLimitEnabled: boolean('hard_limit_enabled').notNull().default(false),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -277,6 +303,122 @@ export const aiAuditLog = pgTable(
   }),
 );
 
+// ==========================================================================
+// Phase 5 — usage metering, plans & cost controls.
+//
+// PRIVACY: the usage ledger NEVER stores prompt/response text — only accounting
+// metadata keyed by requestId / conversationId. Accounting is separate from
+// conversation content.
+// ==========================================================================
+
+/** Plan definitions — DB-backed entitlements (admin-editable). Not billing. */
+export const plans = pgTable('plans', {
+  // Matches the user_plan enum values: FREE / PRO / BUSINESS / ENTERPRISE / ADMIN.
+  slug: varchar('slug', { length: 32 }).primaryKey(),
+  displayName: varchar('display_name', { length: 80 }).notNull(),
+  enabled: boolean('enabled').notNull().default(true),
+  // Allowances — null means "no limit" for that dimension.
+  dailyRequestLimit: integer('daily_request_limit'),
+  monthlyRequestLimit: integer('monthly_request_limit'),
+  dailyTokenLimit: integer('daily_token_limit'),
+  monthlyTokenLimit: integer('monthly_token_limit'),
+  requestsPerMinute: integer('requests_per_minute'),
+  maxConcurrent: integer('max_concurrent'),
+  maxContextTokens: integer('max_context_tokens'),
+  maxOutputTokens: integer('max_output_tokens'),
+  // Allow-lists (empty array = allow all). Slugs of models / workloads / personas.
+  allowedModels: jsonb('allowed_models').notNull().$type<string[]>().default([]),
+  allowedWorkloads: jsonb('allowed_workloads').notNull().$type<string[]>().default([]),
+  allowedPersonas: jsonb('allowed_personas').notNull().$type<string[]>().default([]),
+  // Feature eligibility (readiness; features arrive later).
+  filesEligible: boolean('files_eligible').notNull().default(false),
+  toolsEligible: boolean('tools_eligible').notNull().default(false),
+  webSearchEligible: boolean('web_search_eligible').notNull().default(false),
+  // Routing priority class (lower = higher priority). Readiness for priority routing.
+  priorityClass: integer('priority_class').notNull().default(100),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Plan assignment history — supports trials / expiry / promotions (readiness). */
+export const planAssignments = pgTable(
+  'plan_assignments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    planSlug: varchar('plan_slug', { length: 32 }).notNull(),
+    assignedBy: uuid('assigned_by').references(() => users.id, { onDelete: 'set null' }),
+    note: varchar('note', { length: 200 }),
+    // Trial / subscription window readiness. endsAt = null means open-ended.
+    startsAt: timestamp('starts_at', { withTimezone: true }).notNull().defaultNow(),
+    endsAt: timestamp('ends_at', { withTimezone: true }),
+    // Future org-level allowances.
+    organizationId: uuid('organization_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index('plan_assignments_user_idx').on(t.userId),
+  }),
+);
+
+/**
+ * Usage ledger — one row per AI request that reached a provider (success, error,
+ * cancelled, or timeout). Idempotent on requestId. NO prompt/response text.
+ */
+export const usageEvents = pgTable(
+  'usage_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    requestId: uuid('request_id').notNull().unique(),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    organizationId: uuid('organization_id'),
+    conversationId: uuid('conversation_id'),
+    // Logical BIINA model + resolved provider (non-secret identifiers).
+    biinaModelSlug: varchar('biina_model_slug', { length: 64 }),
+    providerType: varchar('provider_type', { length: 48 }),
+    providerModelId: varchar('provider_model_id', { length: 160 }),
+    persona: varchar('persona', { length: 32 }),
+    workload: varchar('workload', { length: 32 }),
+    plan: varchar('plan', { length: 32 }),
+    // Token accounting (nullable — never invented when the provider omits them).
+    inputTokens: integer('input_tokens'),
+    outputTokens: integer('output_tokens'),
+    totalTokens: integer('total_tokens'),
+    // Internal cost estimate (never provider-authoritative unless tokens are).
+    estimatedInputCost: real('estimated_input_cost'),
+    estimatedOutputCost: real('estimated_output_cost'),
+    estimatedTotalCost: real('estimated_total_cost'),
+    currency: varchar('currency', { length: 8 }).notNull().default('USD'),
+    // Latency metrics.
+    timeToFirstTokenMs: integer('ttft_ms'),
+    generationMs: integer('generation_ms'),
+    totalLatencyMs: integer('total_latency_ms'),
+    // Fallback accounting.
+    fallbackUsed: boolean('fallback_used').notNull().default(false),
+    fallbackProviderType: varchar('fallback_provider_type', { length: 48 }),
+    fallbackModelSlug: varchar('fallback_model_slug', { length: 64 }),
+    // Per-provider-attempt operational costing (primary + fallback), no content.
+    providerAttempts: jsonb('provider_attempts').$type<
+      Array<{ providerType: string; providerModelId?: string; status: string; inputTokens?: number; outputTokens?: number; estimatedCost?: number }>
+    >(),
+    status: usageStatus('status').notNull(),
+    failureCategory: varchar('failure_category', { length: 48 }),
+    // Whether this event counted against the user's quota (provider failures don't).
+    countedAgainstQuota: boolean('counted_against_quota').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => ({
+    userCreatedIdx: index('usage_user_created_idx').on(t.userId, t.createdAt),
+    providerCreatedIdx: index('usage_provider_created_idx').on(t.providerType, t.createdAt),
+    modelCreatedIdx: index('usage_model_created_idx').on(t.biinaModelSlug, t.createdAt),
+    planCreatedIdx: index('usage_plan_created_idx').on(t.plan, t.createdAt),
+    statusIdx: index('usage_status_idx').on(t.status),
+    createdIdx: index('usage_created_idx').on(t.createdAt),
+  }),
+);
+
 export const aiModelsRelations = relations(aiModels, ({ one }) => ({
   provider: one(aiProviders, { fields: [aiModels.providerId], references: [aiProviders.id] }),
 }));
@@ -290,3 +432,7 @@ export type AiProvider = typeof aiProviders.$inferSelect;
 export type AiModel = typeof aiModels.$inferSelect;
 export type AiRoute = typeof aiRoutes.$inferSelect;
 export type AiSettings = typeof aiSettings.$inferSelect;
+export type Plan = typeof plans.$inferSelect;
+export type PlanAssignment = typeof planAssignments.$inferSelect;
+export type UsageEvent = typeof usageEvents.$inferSelect;
+export type NewUsageEvent = typeof usageEvents.$inferInsert;

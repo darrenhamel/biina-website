@@ -215,6 +215,38 @@ display name.
 
 Details: [`MODEL_ROUTING.md`](./MODEL_ROUTING.md) · [`AI_CONTROL_PLANE.md`](./AI_CONTROL_PLANE.md).
 
+## 4b. Usage metering, plans & cost controls (Phase 5)
+
+BIINA owns its accounting **independently of any provider**:
+
+```
+User → entitlement → quota → routing → provider → usage returned → BIINA usage ledger
+```
+
+- **Preflight** (`server/ai/preflight.ts`, in the AI service before any provider
+  call): entitlement → context size → hard budget → quota → concurrency. Rejections
+  throw typed errors (`not_entitled`/`quota_exceeded`/`rate_limited`/
+  `context_too_large`/`budget_exceeded`) mapped to safe statuses (403/429/413/503).
+  A rejected request uses no provider and writes no ledger row.
+- **Usage ledger** (`usage_events`): one idempotent row per provider-reaching
+  request (success/error/cancelled/timeout), written in the service `finally` so
+  it survives Stop/disconnect. **No prompt/response text** — accounting is separate
+  from content. Provider failures don't consume quota.
+- **Pure services** (all unit-tested without a DB): `cost` (never invents tokens),
+  `entitlements`, `quota` (day/month/minute, UTC resets), `budget` (soft warn /
+  hard block), `concurrency` (per-user slots).
+- **Plans** (`plans`, admin-editable): FREE/PRO/BUSINESS/ENTERPRISE/ADMIN with
+  request/token/rate/concurrency/context/output limits + allow-lists. ADMIN power
+  is an entitlement (unlimited plan), not a code bypass. Output caps flow to the
+  provider (`num_predict` / `max_tokens`).
+- **Admin**: Usage & Cost dashboard (summary, budget + editable thresholds,
+  breakdowns by provider/model/plan/workload/persona, top users, model economics)
+  and Plans (edit limits, assign plans, audited). No payments.
+
+Details: [`USAGE_METERING.md`](./USAGE_METERING.md) ·
+[`PLANS_AND_ENTITLEMENTS.md`](./PLANS_AND_ENTITLEMENTS.md) ·
+[`COST_CONTROLS.md`](./COST_CONTROLS.md).
+
 ### System prompt (server-side, layered)
 
 Assembled entirely on the server (`apps/web/src/server/ai/system-prompt.ts`),

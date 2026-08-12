@@ -42,6 +42,8 @@ export interface ChatRequest {
   /** Stream deltas (default true). Non-streaming callers can buffer the async iterable. */
   stream?: boolean;
   temperature?: number;
+  /** Cap on generated tokens (plan/model policy). Mapped to the provider's param. */
+  maxOutputTokens?: number;
   /** Correlation id, generated once per request and logged (never a secret). */
   requestId: string;
   /** Enforces timeouts / cancellation from the caller. */
