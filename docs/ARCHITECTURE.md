@@ -434,6 +434,63 @@ Details: [`CONNECTOR_ARCHITECTURE.md`](./CONNECTOR_ARCHITECTURE.md) ·
 [`TOOL_EXECUTION.md`](./TOOL_EXECUTION.md) ·
 [`CONNECTOR_ACTIVATION_CHECKLIST.md`](./CONNECTOR_ACTIVATION_CHECKLIST.md).
 
+## 4h. Agent engine & safe tool execution (Phase 11)
+
+Lets BIINA.ai *act* over the Phase 10 tool allowlist — a **bounded,
+human-supervised** agent, not an autonomous one. The model **proposes**; BIINA
+**authorizes, executes, limits, and audits**. The LLM is never the authority on
+permissions, approvals, scopes, billing, or tenant boundaries, and (as always) the
+frontend never learns which model answered. Code: `apps/web/src/server/agent/`.
+
+```
+Model may:  PROPOSE · PLAN · SELECT a tool · REQUEST an action
+BIINA does: VALIDATE · AUTHORIZE · CONFIRM · EXECUTE · LIMIT · AUDIT
+
+Goal → Context Assembly → Plan/Tool Selection → Policy Engine → Approval Gate
+     → ToolExecutionService → Connector Adapter → External Service → Result
+     → Verification → User Response
+```
+
+- **Modes — AGENT is never the default.** CHAT (no tools) · ASSISTED (reads auto,
+  writes pause for approval; schema default) · AGENT (adds planning). Every write is
+  human-gated in every mode.
+- **Central risk taxonomy, model never sets it.** `READ_ONLY` allow ·
+  `REVERSIBLE_WRITE` / `EXTERNAL_COMMUNICATION` require approval ·
+  `FINANCIAL_OR_COMMITMENT` / `DESTRUCTIVE` / `HIGH_RISK` denied by default.
+- **Strict allowlist — no arbitrary HTTP/API/shell tool.** Only catalog tools with
+  Zod schemas run; the catalog is filtered to what the context actually has
+  (connection, scope, plan, mode, policy), so the model never sees a tool it can't use.
+- **Policy engine, most-restrictive-wins.** `decidePolicy` → ALLOW /
+  REQUIRE_APPROVAL / DENY; effective policy folds Platform → Org → User (a scope can
+  only tighten). Category switches + per-tool overrides + cross-connector gating.
+- **Human approval for every write.** Single-use, expiring (`AGENT_APPROVAL_TTL_MS`,
+  15 min), hash-bound to the exact normalized args, owner+org-checked; edit → new
+  hash. The preview the user sees is exactly what runs; no secrets in it.
+- **Execution gauntlet (writes).** kill switches → dry-run → idempotency → live
+  policy → consume approval → live connection+scope → live entitlement → server-only
+  credential → adapter write → **verify provider id** (no id ⇒ `UNKNOWN_OUTCOME`,
+  never success) → meter + audit. No auto-retry on ambiguous outcomes.
+- **Bounded + audited.** Step / time / cost limits + loop detection; operational
+  steps persisted, **never chain-of-thought**; metadata-only audit + admin/org
+  overview; tenant isolation mirrors connectors (personal XOR org, → null → 404).
+- **Read-live, write-mock by default.** Reads run through the Phase 10
+  `ToolExecutionService`; writes run on the **mock** adapter offline. Real
+  Gmail/Calendar/Slack write adapters are structural and require live scopes +
+  `AGENT_WRITE_ACTIONS_ENABLED=true` — both **off by default**. Flags:
+  `AGENT_EXECUTION_ENABLED` (kill switch), `AGENT_WRITE_ACTIONS_ENABLED` (off),
+  `AGENT_DRY_RUN`, `AGENT_DISABLED_TOOLS`, step/runtime limits. Additive schema
+  (agent_sessions/steps/actions, approval_requests, agent_policies + plan columns).
+  Gated by `plan.agentEnabled` + per-plan session quotas. **Real external writes
+  require manual activation.**
+
+Details: [`AGENT_ARCHITECTURE.md`](./AGENT_ARCHITECTURE.md) ·
+[`TOOL_POLICY.md`](./TOOL_POLICY.md) ·
+[`ACTION_APPROVALS.md`](./ACTION_APPROVALS.md) ·
+[`AGENT_SECURITY.md`](./AGENT_SECURITY.md) ·
+[`AGENT_EXECUTION.md`](./AGENT_EXECUTION.md) ·
+[`AGENT_AUDITING.md`](./AGENT_AUDITING.md) ·
+[`AGENT_ACTIVATION_CHECKLIST.md`](./AGENT_ACTIVATION_CHECKLIST.md).
+
 ### System prompt (server-side, layered)
 
 Assembled entirely on the server (`apps/web/src/server/ai/system-prompt.ts`),

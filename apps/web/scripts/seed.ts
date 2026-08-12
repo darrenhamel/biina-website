@@ -343,11 +343,26 @@ async function seedPlans(db: DB) {
       .where(eq(plans.slug, slug));
   }
 
+  // Phase 11 — agent entitlements per tier. Conservative: FREE has no agent.
+  const agent: Record<string, { on: boolean; day: number | null; month: number | null; steps: number | null; writes: number | null; msgs: number | null }> = {
+    FREE: { on: false, day: 0, month: 0, steps: 0, writes: 0, msgs: 0 },
+    PRO: { on: true, day: 20, month: 200, steps: 8, writes: 25, msgs: 25 },
+    BUSINESS: { on: true, day: 100, month: 2000, steps: 12, writes: 200, msgs: 100 },
+    ENTERPRISE: { on: true, day: null, month: null, steps: 15, writes: null, msgs: null },
+    ADMIN: { on: true, day: null, month: null, steps: 20, writes: null, msgs: null },
+  };
+  for (const [slug, a] of Object.entries(agent)) {
+    await db
+      .update(plans)
+      .set({ agentEnabled: a.on, agentSessionsDailyLimit: a.day, agentSessionsMonthlyLimit: a.month, agentMaxStepsPerSession: a.steps, agentWriteActionsDailyLimit: a.writes, agentExternalMessagesDailyLimit: a.msgs })
+      .where(eq(plans.slug, slug));
+  }
+
   // Give the seeded admin the ADMIN plan (entitlement via plan, not a bypass).
   const adminEmail = process.env.SEED_ADMIN_EMAIL || 'admin@biina.local';
   await db.update(users).set({ plan: 'ADMIN' }).where(eq(users.email, adminEmail));
 
-  console.log('✓ plans seeded (FREE/PRO/BUSINESS/ENTERPRISE/ADMIN) + RAG entitlements');
+  console.log('✓ plans seeded (FREE/PRO/BUSINESS/ENTERPRISE/ADMIN) + RAG/web/connector/agent entitlements');
 }
 
 /**

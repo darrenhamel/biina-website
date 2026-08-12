@@ -21,8 +21,8 @@ describe('persona architecture', () => {
 
 describe('navigation architecture', () => {
   it('has the shipped areas enabled and future areas scaffolded as disabled', () => {
-    // Shipped, usable areas (chat since Phase 1; knowledge since Phase 8).
-    const shipped = new Set(['chat', 'knowledge']);
+    // Shipped, usable areas (chat since Phase 1; knowledge since Phase 8; agents since Phase 11).
+    const shipped = new Set(['chat', 'knowledge', 'agents']);
     for (const key of shipped) {
       expect(primaryNav.find((n) => n.key === key)?.enabled).toBe(true);
     }

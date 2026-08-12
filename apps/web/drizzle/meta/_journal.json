@@ -64,6 +64,13 @@
       "when": 1786550825934,
       "tag": "0008_perpetual_proudstar",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1786556871580,
+      "tag": "0009_agent_engine",
+      "breakpoints": true
     }
   ]
 }

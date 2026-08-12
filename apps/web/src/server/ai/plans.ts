@@ -49,6 +49,12 @@ const FALLBACK_FREE: Plan = {
   maxOrganizationConnections: null,
   connectedSearchDailyLimit: null,
   connectedSearchMonthlyLimit: null,
+  agentEnabled: false,
+  agentSessionsDailyLimit: null,
+  agentSessionsMonthlyLimit: null,
+  agentMaxStepsPerSession: null,
+  agentWriteActionsDailyLimit: null,
+  agentExternalMessagesDailyLimit: null,
   priorityClass: 100,
   updatedAt: new Date(0),
 };

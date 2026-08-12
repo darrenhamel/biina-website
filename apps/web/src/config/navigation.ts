@@ -35,6 +35,6 @@ export const primaryNav: NavItem[] = [
   { key: 'search', path: 'search', labelKey: 'search', icon: 'search', enabled: false },
   { key: 'templates', path: 'templates', labelKey: 'templates', icon: 'templates', enabled: false },
   { key: 'projects', path: 'projects', labelKey: 'projects', icon: 'projects', enabled: false },
-  { key: 'agents', path: 'agents', labelKey: 'agents', icon: 'agents', enabled: false },
+  { key: 'agents', path: 'agent', labelKey: 'agent', icon: 'agents', enabled: true },
   { key: 'files', path: 'files', labelKey: 'files', icon: 'files', enabled: false },
 ];

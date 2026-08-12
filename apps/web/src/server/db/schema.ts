@@ -378,6 +378,13 @@ export const plans = pgTable('plans', {
   maxOrganizationConnections: integer('max_organization_connections'),
   connectedSearchDailyLimit: integer('connected_search_daily_limit'),
   connectedSearchMonthlyLimit: integer('connected_search_monthly_limit'),
+  // Phase 11 — agent engine + safe tool execution. null = unlimited for a limit.
+  agentEnabled: boolean('agent_enabled').notNull().default(false),
+  agentSessionsDailyLimit: integer('agent_sessions_daily_limit'),
+  agentSessionsMonthlyLimit: integer('agent_sessions_monthly_limit'),
+  agentMaxStepsPerSession: integer('agent_max_steps_per_session'),
+  agentWriteActionsDailyLimit: integer('agent_write_actions_daily_limit'),
+  agentExternalMessagesDailyLimit: integer('agent_external_messages_daily_limit'),
   // Routing priority class (lower = higher priority). Readiness for priority routing.
   priorityClass: integer('priority_class').notNull().default(100),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -1104,3 +1111,180 @@ export type OrganizationMember = typeof organizationMembers.$inferSelect;
 export type OrganizationInvitation = typeof organizationInvitations.$inferSelect;
 export type SecurityEvent = typeof securityEvents.$inferSelect;
 export type EmailToken = typeof emailTokens.$inferSelect;
+
+// ==========================================================================
+// Phase 11 — agent engine + safe tool execution.
+//
+// SAFETY MODEL: the model may PROPOSE / PLAN / SELECT / REQUEST; BIINA controls
+// AUTHORIZE / CONFIRM / EXECUTE / LIMIT / AUDIT. The model is NEVER the final
+// authority on whether an action runs. We store OPERATIONAL steps only — never
+// hidden model chain-of-thought. External writes are bound to a single-use,
+// expiring approval whose hash pins the exact normalized arguments.
+// ==========================================================================
+
+export const agentMode = pgEnum('agent_mode', ['CHAT', 'ASSISTED', 'AGENT']);
+export const agentSessionStatus = pgEnum('agent_session_status', ['PENDING', 'RUNNING', 'AWAITING_APPROVAL', 'COMPLETED', 'FAILED', 'CANCELED', 'BLOCKED']);
+export const agentStepStatus = pgEnum('agent_step_status', ['PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'SKIPPED']);
+export const agentActionStatus = pgEnum('agent_action_status', ['PROPOSED', 'AWAITING_APPROVAL', 'APPROVED', 'EXECUTING', 'SUCCEEDED', 'FAILED', 'REJECTED', 'CANCELED', 'BLOCKED', 'EXPIRED', 'UNKNOWN_OUTCOME']);
+export const approvalStatus = pgEnum('approval_status', ['PENDING', 'APPROVED', 'REJECTED', 'EXPIRED', 'CONSUMED']);
+export const agentPolicyScope = pgEnum('agent_policy_scope', ['PLATFORM', 'ORGANIZATION', 'USER']);
+
+/** An agent run: a bounded, human-supervised attempt at a user goal. */
+export const agentSessions = pgTable(
+  'agent_sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+    conversationId: uuid('conversation_id'),
+    mode: agentMode('mode').notNull().default('ASSISTED'),
+    status: agentSessionStatus('status').notNull().default('PENDING'),
+    // The normalized user goal (objective + server-derived constraints). No secrets.
+    goal: text('goal').notNull(),
+    plan: jsonb('plan').$type<string[]>().default([]), // concise user-facing steps (NOT chain-of-thought)
+    maxSteps: integer('max_steps').notNull().default(8),
+    stepsUsed: integer('steps_used').notNull().default(0),
+    toolCallsUsed: integer('tool_calls_used').notNull().default(0),
+    writeActionsUsed: integer('write_actions_used').notNull().default(0),
+    // Cost/usage accounting (estimated). Aggregated from LLM + tool operations.
+    estimatedCost: real('estimated_cost').notNull().default(0),
+    costBudget: real('cost_budget'), // null = plan/default budget
+    currency: varchar('currency', { length: 8 }).notNull().default('USD'),
+    dryRun: boolean('dry_run').notNull().default(false),
+    error: varchar('error', { length: 300 }),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    canceledAt: timestamp('canceled_at', { withTimezone: true }),
+    deadlineAt: timestamp('deadline_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index('agent_sessions_user_idx').on(t.userId),
+    orgIdx: index('agent_sessions_org_idx').on(t.organizationId),
+    statusIdx: index('agent_sessions_status_idx').on(t.status),
+    createdIdx: index('agent_sessions_created_idx').on(t.createdAt),
+  }),
+);
+
+/** One operational step in an agent run. Structured summaries only — no reasoning. */
+export const agentSteps = pgTable(
+  'agent_steps',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    agentSessionId: uuid('agent_session_id').notNull().references(() => agentSessions.id, { onDelete: 'cascade' }),
+    stepIndex: integer('step_index').notNull(),
+    stepType: varchar('step_type', { length: 32 }).notNull(), // PLAN | TOOL_READ | TOOL_WRITE | VERIFY | RESPOND | BLOCKED
+    toolId: varchar('tool_id', { length: 64 }),
+    actionId: uuid('action_id'),
+    status: agentStepStatus('status').notNull().default('PENDING'),
+    inputSummary: varchar('input_summary', { length: 500 }),
+    outputSummary: varchar('output_summary', { length: 1000 }),
+    requestId: uuid('request_id'),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    sessionIdx: index('agent_steps_session_idx').on(t.agentSessionId),
+  }),
+);
+
+/** A concrete tool action proposed by the agent. Write actions carry an arguments hash. */
+export const agentActions = pgTable(
+  'agent_actions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    agentSessionId: uuid('agent_session_id').notNull().references(() => agentSessions.id, { onDelete: 'cascade' }),
+    agentStepId: uuid('agent_step_id'),
+    toolId: varchar('tool_id', { length: 64 }).notNull(),
+    connectionId: uuid('connection_id'),
+    riskLevel: varchar('risk_level', { length: 32 }).notNull(),
+    reversibility: varchar('reversibility', { length: 24 }).notNull().default('IRREVERSIBLE'),
+    approvalStatus: varchar('approval_status', { length: 24 }).notNull().default('NOT_REQUIRED'),
+    // Normalized (validated) arguments. Sensitive fields are redacted before storage.
+    normalizedArguments: jsonb('normalized_arguments'),
+    argumentsHash: varchar('arguments_hash', { length: 96 }),
+    status: agentActionStatus('status').notNull().default('PROPOSED'),
+    // Idempotency: same (session, tool, argsHash) must not run twice.
+    idempotencyKey: varchar('idempotency_key', { length: 120 }),
+    externalResourceId: varchar('external_resource_id', { length: 255 }),
+    resultSummary: varchar('result_summary', { length: 500 }),
+    error: varchar('error', { length: 300 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+    executedAt: timestamp('executed_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => ({
+    sessionIdx: index('agent_actions_session_idx').on(t.agentSessionId),
+    statusIdx: index('agent_actions_status_idx').on(t.status),
+    toolIdx: index('agent_actions_tool_idx').on(t.toolId),
+    // Prevent duplicate external writes within a session (same normalized action).
+    idemUnique: unique('agent_actions_idem_unique').on(t.agentSessionId, t.idempotencyKey),
+  }),
+);
+
+/** Single-use, expiring human approval bound to the EXACT normalized action. */
+export const approvalRequests = pgTable(
+  'approval_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    actionId: uuid('action_id').notNull().references(() => agentActions.id, { onDelete: 'cascade' }),
+    agentSessionId: uuid('agent_session_id').notNull(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id'),
+    toolId: varchar('tool_id', { length: 64 }).notNull(),
+    riskLevel: varchar('risk_level', { length: 32 }).notNull(),
+    // Binds approval to the exact action; if the model changes args, the hash breaks.
+    argumentsHash: varchar('arguments_hash', { length: 96 }).notNull(),
+    // The preview the user actually saw + approved (no secrets/tokens).
+    preview: jsonb('preview'),
+    status: approvalStatus('status').notNull().default('PENDING'),
+    decidedByUserId: uuid('decided_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+    consumedAt: timestamp('consumed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    actionIdx: index('approval_requests_action_idx').on(t.actionId),
+    statusIdx: index('approval_requests_status_idx').on(t.status),
+    expiresIdx: index('approval_requests_expires_idx').on(t.expiresAt),
+  }),
+);
+
+/** Effective agent policy at a scope. Platform is the most restrictive ceiling. */
+export const agentPolicies = pgTable(
+  'agent_policies',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    scope: agentPolicyScope('scope').notNull(),
+    // scopeId: null for PLATFORM; organizationId for ORGANIZATION; userId for USER.
+    scopeId: uuid('scope_id'),
+    // Master switches (a stricter scope can turn things OFF, never force ON).
+    agentEnabled: boolean('agent_enabled'),
+    writeActionsEnabled: boolean('write_actions_enabled'),
+    emailSendingEnabled: boolean('email_sending_enabled'),
+    calendarActionsEnabled: boolean('calendar_actions_enabled'),
+    slackPostingEnabled: boolean('slack_posting_enabled'),
+    crmWritesEnabled: boolean('crm_writes_enabled'),
+    maxStepsPerSession: integer('max_steps_per_session'),
+    // Per-tool overrides: { "gmail.send": "DENY" | "REQUIRE_APPROVAL" | "ALLOW" }.
+    toolOverrides: jsonb('tool_overrides').$type<Record<string, string>>().default({}),
+    // Cross-connector transfer requires approval by default; a scope may DENY it.
+    crossConnectorTransfer: varchar('cross_connector_transfer', { length: 24 }),
+    updatedByUserId: uuid('updated_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    scopeUnique: unique('agent_policies_scope_unique').on(t.scope, t.scopeId),
+  }),
+);
+
+export type AgentSession = typeof agentSessions.$inferSelect;
+export type AgentStep = typeof agentSteps.$inferSelect;
+export type AgentAction = typeof agentActions.$inferSelect;
+export type ApprovalRequest = typeof approvalRequests.$inferSelect;
+export type AgentPolicy = typeof agentPolicies.$inferSelect;

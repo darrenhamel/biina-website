@@ -323,8 +323,36 @@ quotas. See [`docs/CONNECTOR_ARCHITECTURE.md`](./docs/CONNECTOR_ARCHITECTURE.md)
 [`docs/GOOGLE_CONNECTORS.md`](./docs/GOOGLE_CONNECTORS.md), and
 [`docs/TOOL_EXECUTION.md`](./docs/TOOL_EXECUTION.md).
 
-**Deferred:** the Phase 11 **agent engine** and **write/side-effecting connector
-actions** (registered but disabled, pending user-confirmation/ActionPreview), **live
-provider credentials** (Google/Slack ship on the mock connector), live payment
+**Added (Phase 11):** **the agent engine & safe tool execution** — BIINA.ai can now
+*plan and act* over the Phase 10 tool allowlist, as a **bounded, human-supervised**
+agent, not an autonomous one. The model **proposes** (one JSON decision per turn);
+BIINA **authorizes, executes, limits, and audits**. Reads run live; **every
+side-effecting write pauses for explicit human approval** with an exact
+`ActionPreview` (no secrets). Approvals are single-use, expiring, and **hash-bound**
+to the precise arguments — an edit rebinds a new hash — and a central risk taxonomy
+(model never sets it) allows reads, requires approval for external communication, and
+**denies destructive/financial actions by default**. A policy engine folds Platform →
+Org → User (most-restrictive-wins), and there is **no arbitrary-HTTP/API/shell tool**.
+Writes run a live gauntlet — kill switches → dry-run → idempotency → live policy →
+consume approval → live connection/scope → live entitlement → server-only credential
+→ adapter write → **verify provider id** (no id ⇒ unknown outcome, never success) —
+with no auto-retry on ambiguous outcomes. Runs are bounded (step/time/cost limits +
+loop detection), tenant-isolated (personal XOR org), and audited **metadata-only**
+(operational steps, **never chain-of-thought**). Reads run live; **writes run on a
+mock adapter by default** — real Gmail/Calendar/Slack writes stay **disabled** until
+live write scopes **and** `AGENT_WRITE_ACTIONS_ENABLED=true` and the manual steps in
+[`docs/AGENT_ACTIVATION_CHECKLIST.md`](./docs/AGENT_ACTIVATION_CHECKLIST.md). Gated by
+`plan.agentEnabled` + per-plan session quotas. See
+[`docs/AGENT_ARCHITECTURE.md`](./docs/AGENT_ARCHITECTURE.md),
+[`docs/TOOL_POLICY.md`](./docs/TOOL_POLICY.md),
+[`docs/ACTION_APPROVALS.md`](./docs/ACTION_APPROVALS.md),
+[`docs/AGENT_SECURITY.md`](./docs/AGENT_SECURITY.md),
+[`docs/AGENT_EXECUTION.md`](./docs/AGENT_EXECUTION.md), and
+[`docs/AGENT_AUDITING.md`](./docs/AGENT_AUDITING.md).
+
+**Deferred:** **real external write actions** (the agent ships write-capable but on
+the mock adapter; real Gmail/Calendar/Slack writes require manual activation),
+standing/pre-authorized actions, automatic compensating actions (undo/rollback),
+**live provider credentials** (Google/Slack ship on the mock connector), live payment
 activation, marketplace/payouts, a live search-provider key, a caching layer for
 fetched pages, and the pre-launch audit. See [`docs/ROADMAP.md`](./docs/ROADMAP.md).

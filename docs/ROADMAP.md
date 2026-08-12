@@ -237,6 +237,56 @@ Legend: ☐ not started · ◐ in progress · ☑ done
   **Next: Phase 11 — the agent engine** (planning over the tool allowlist +
   ActionPreview/confirmation to safely enable write actions).
 
+## Phase 11 — Agent engine & safe tool execution  ☑  *(build prompt — agent track)*
+
+- ☑ **Bounded, human-supervised orchestrator** (`orchestrator.ts`): model returns
+  ONE JSON object per turn (`plan`/`tool`/`final`); BIINA validates + authorizes.
+  Reads with an ALLOW policy run immediately; **every write pauses for human
+  approval** (`AWAITING_APPROVAL`) and resumes only on a valid one. Step / time /
+  cost limits + loop detection (threshold 2). Model turn is injectable for tests.
+- ☑ **Central risk taxonomy** (`risk.ts`): `READ_ONLY`→ALLOW,
+  `REVERSIBLE_WRITE`/`EXTERNAL_COMMUNICATION`→REQUIRE_APPROVAL,
+  `FINANCIAL_OR_COMMITMENT`/`DESTRUCTIVE`/`HIGH_RISK`→DENY. The model **never** sets
+  risk. Kill switches: `agentExecutionEnabled` / `agentWriteActionsEnabled` (off) /
+  `agentDryRunForced` / `toolKilled`.
+- ☑ **Strict tool allowlist** (`tool-catalog.ts`): Zod-schema'd `AGENT_TOOLS`,
+  context-aware filtering (mode/plan/connection/scope/policy), output normalization —
+  **no arbitrary-HTTP / API / shell tool**.
+- ☑ **Policy engine** (`policy.ts`/`policies-store.ts`): `decidePolicy` → ALLOW /
+  REQUIRE_APPROVAL / DENY; effective policy folds **Platform → Org → User**
+  (most-restrictive-wins; a scope can only tighten). Category switches, per-tool
+  overrides, cross-connector gating.
+- ☑ **Approvals** (`approvals.ts`/`preview.ts`/`hashing.ts`): single-use
+  (APPROVED→CONSUMED atomic), expiring (`AGENT_APPROVAL_TTL_MS`, 15 min default),
+  **hash-bound** to exact normalized args, owner+org-checked; ActionPreview (no
+  secrets); edit → new hash; rejection tells the agent to stop.
+- ☑ **Execution gauntlet** (`execution.ts`/`write-adapters.ts`): kill switches →
+  dry-run → idempotency → live policy → consume approval → live connection+scope →
+  live entitlement → server-only credential → adapter write → **verify provider id**
+  (no id ⇒ `UNKNOWN_OUTCOME`, never success) → meter + audit. **No auto-retry** on
+  ambiguous outcomes. Mock adapter (idempotency ledger) runs the path offline; real
+  Gmail/Calendar/Slack adapters are structural (need live write scopes).
+- ☑ **Persistence + tenant isolation** (`sessions.ts`): agent_sessions/steps/actions,
+  personal XOR org (`resolveSessionAccess` → null → 404); **operational steps only,
+  NEVER chain-of-thought**. Quotas (`quotas.ts`): plan-gated + daily/monthly session
+  limits, effective step cap, run deadline. Admin (`admin.ts`): metadata-only
+  overview + audited `setAgentPolicy`.
+- ☑ **Plan/quota + schema**: `plans` gained `agentEnabled`, session daily/monthly
+  limits, max steps, write-action + external-message daily limits. New tables
+  agent_sessions/steps/actions (unique idempotency per session), approval_requests
+  (single-use/expiring), agent_policies (PLATFORM/ORGANIZATION/USER). Additive
+  migration. Security events `agent.*`; `connector_usage_events` metering.
+- ☑ **APIs**: `agent/sessions` (start/list), `agent/sessions/[id]` (detail),
+  `.../cancel`, `agent/approvals/[id]` (approve/reject/edit), `admin/agents`
+  (overview + platform policy), `orgs/[slug]/agent-policy` (org policy).
+- **Deliverable:** a bounded, human-supervised agent — **reads run live, writes run
+  on the mock adapter by default**. **Real external writes are NOT auto-enabled**:
+  they require live connector write scopes **and** `AGENT_WRITE_ACTIONS_ENABLED=true`
+  and the manual steps in `AGENT_ACTIVATION_CHECKLIST.md`. Docs:
+  `AGENT_ARCHITECTURE.md`, `TOOL_POLICY.md`, `ACTION_APPROVALS.md`,
+  `AGENT_SECURITY.md`, `AGENT_EXECUTION.md`, `AGENT_AUDITING.md`,
+  `AGENT_ACTIVATION_CHECKLIST.md`.
+
 ## Phase 10 — Pre-launch audit  ☐  *(build prompt 8)*
 
 - ☐ Audit all 24 areas; run typecheck / lint / tests / prod build / migration validation / dep-security.

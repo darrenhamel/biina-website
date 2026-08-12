@@ -225,6 +225,41 @@ export const billingConfigSchema = z
   })
   .strict();
 
+// ---- Phase 11: agent engine ----
+
+export const startAgentSchema = z
+  .object({
+    goal: z.string().trim().min(3).max(4000),
+    mode: z.enum(['ASSISTED', 'AGENT']).default('ASSISTED'),
+    conversationId: z.string().uuid().optional(),
+    maxSteps: z.number().int().min(1).max(20).optional(),
+    dryRun: z.boolean().optional(),
+  })
+  .strict();
+
+export const approvalDecisionSchema = z
+  .object({
+    decision: z.enum(['APPROVED', 'REJECTED']),
+    // Optional user edits to the action before approval — produces a NEW action hash.
+    editedArguments: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
+
+// Stricter-or-equal agent policy patch (a scope can only tighten safety).
+export const agentPolicySchema = z
+  .object({
+    agentEnabled: z.boolean().nullable().optional(),
+    writeActionsEnabled: z.boolean().nullable().optional(),
+    emailSendingEnabled: z.boolean().nullable().optional(),
+    calendarActionsEnabled: z.boolean().nullable().optional(),
+    slackPostingEnabled: z.boolean().nullable().optional(),
+    crmWritesEnabled: z.boolean().nullable().optional(),
+    maxStepsPerSession: z.number().int().min(1).max(20).nullable().optional(),
+    toolOverrides: z.record(z.string().max(64), z.enum(['ALLOW', 'REQUIRE_APPROVAL', 'DENY'])).optional(),
+    crossConnectorTransfer: z.enum(['ALLOW', 'REQUIRE_APPROVAL', 'DENY']).nullable().optional(),
+  })
+  .strict();
+
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ChatRequestInput = z.infer<typeof chatRequestSchema>;

@@ -45,7 +45,22 @@ export type SecurityEventType =
   | 'connector.search'
   | 'connector.read'
   | 'connector.action_attempted'
-  | 'connector.action_blocked';
+  | 'connector.action_blocked'
+  // Phase 11 — agent engine / safe tool execution.
+  | 'agent.session_started'
+  | 'agent.session_completed'
+  | 'agent.session_canceled'
+  | 'agent.session_blocked'
+  | 'agent.tool_proposed'
+  | 'agent.tool_allowed'
+  | 'agent.tool_denied'
+  | 'agent.approval_requested'
+  | 'agent.approval_approved'
+  | 'agent.approval_rejected'
+  | 'agent.action_executed'
+  | 'agent.action_failed'
+  | 'agent.action_unknown_outcome'
+  | 'agent.policy_changed';
 
 export async function logSecurityEvent(entry: {
   event: SecurityEventType;
