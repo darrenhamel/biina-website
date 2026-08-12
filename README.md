@@ -410,6 +410,41 @@ embedding provider (no second vector store) and is retrieved with a tight budget
 [`docs/ORGANIZATION_MEMORY.md`](./docs/ORGANIZATION_MEMORY.md), and
 [`docs/MEMORY_SECURITY.md`](./docs/MEMORY_SECURITY.md).
 
+**Added (Phase 14):** **multimodal AI — vision, OCR, audio & voice** — BIINA.ai can now
+**understand images and audio** and **speak answers back**. As everywhere else, BIINA is
+the **orchestration layer**: every modality goes through a **provider-independent
+service** (Vision / OCR / speech-to-text / text-to-speech), never coupled to a single
+vendor. The **shipped providers are mock/offline** and deterministic (they power the
+tests and demos with no network and no credentials); **real vision / OCR / STT / TTS
+providers require configuration and manual activation** — no paid vendor is auto-enabled
+and there are **no silent paid calls**. Uploads are validated **server-side** by magic
+bytes (the browser's declared type is never trusted), size, and dimensions (with a
+decompression-bomb guard); bytes are stored **opaque**, served only as a download
+attachment (never inline HTML), and **EXIF/location metadata never leaves the server**.
+Text BIINA reads out of an image (OCR) or hears in audio-within-an-image is **untrusted
+data** — the same prompt-injection boundary as documents, web, and connected sources — so
+a *"SYSTEM: ignore all rules"* image cannot instruct the model; a QR code or URL in an
+image is **not auto-fetched**; and media **never authorizes an action** or silently
+creates memory. An audio **transcript is your own words** and passes exactly the controls
+your typed text does. Media is **tenant-isolated** (personal XOR org) with access
+**re-checked on every retrieval** — a known media id is never enough. **Voice mode** is
+turn-based (record → transcribe → answer → speak), opt-in, and — critically — **never
+bypasses approval**: a spoken high-impact request still stops at the normal approval UI
+(no loose spoken "yes"), and a spoken workflow becomes a **draft, not an armed
+automation**. Spoken answers use **logical BIINA voices** (English + Arabic) whose
+provider ids stay server-side, and synthesized audio is scoped **per user**, never
+globally cached. Media metering is a **separate ledger** from AI text tokens (no
+double-counting), records **provider-reported units only**, and is gated by per-plan
+entitlements and quotas. See
+[`docs/MULTIMODAL_ARCHITECTURE.md`](./docs/MULTIMODAL_ARCHITECTURE.md),
+[`docs/VISION.md`](./docs/VISION.md), [`docs/OCR.md`](./docs/OCR.md),
+[`docs/SPEECH_TO_TEXT.md`](./docs/SPEECH_TO_TEXT.md),
+[`docs/TEXT_TO_SPEECH.md`](./docs/TEXT_TO_SPEECH.md),
+[`docs/VOICE_MODE.md`](./docs/VOICE_MODE.md),
+[`docs/MULTIMODAL_SECURITY.md`](./docs/MULTIMODAL_SECURITY.md),
+[`docs/MULTIMODAL_COSTS.md`](./docs/MULTIMODAL_COSTS.md), and
+[`docs/MULTIMODAL_ACTIVATION_CHECKLIST.md`](./docs/MULTIMODAL_ACTIVATION_CHECKLIST.md).
+
 **Deferred:** **real external write actions** (the agent ships write-capable but on
 the mock adapter; real Gmail/Calendar/Slack writes require manual activation),
 **scheduled external writes** (off by default; need a standing authorization **and**
@@ -419,6 +454,12 @@ triggers**, **org service identities**, a **workflow template marketplace**, a
 **model-backed memory inference** (a deterministic offline extractor ships; a model
 extractor plugs in behind it), **memory consolidation**, **conversation
 summarization**, a **memory export UI**, **background memory-expiration cleanup**,
+**real vision / OCR / STT / TTS providers** (deterministic mock providers ship; real
+vendors plug in behind the same interfaces via configuration), **image
+resizing / EXIF-stripping by re-encoding**, **streaming / realtime voice** (barge-in /
+interruption) and **speaker diarization**, a **transcript-editing UI**, **signed-URL
+media delivery**, a **per-unit media cost service**, the **scanned-PDF → RAG** wiring
+(the OCR service + RAG pipeline ship; the page-image-to-ingestion hop is later),
 **live provider credentials** (Google/Slack ship on the mock connector), live payment
 activation, marketplace/payouts, a live search-provider key, a caching layer for
 fetched pages, and the pre-launch audit. See [`docs/ROADMAP.md`](./docs/ROADMAP.md).

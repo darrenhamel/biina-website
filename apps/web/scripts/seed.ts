@@ -25,7 +25,11 @@ import {
   commercialPrices,
   billingConfig,
   connectorDefinitions,
+  voiceProfiles,
 } from '../src/server/db/schema';
+import { DEFAULT_VOICES } from '../src/server/media/voices';
+
+const MEDIA_VOICES = DEFAULT_VOICES;
 
 async function main() {
   const url = process.env.DATABASE_URL;
@@ -388,11 +392,31 @@ async function seedPlans(db: DB) {
       .where(eq(plans.slug, slug));
   }
 
+  // Phase 14 — multimodal entitlements per tier. FREE has vision only (limited).
+  const mm: Record<string, { vision: boolean; imgReq: number | null; imgDay: number | null; ocr: boolean; ocrMo: number | null; stt: boolean; audMin: number | null; tts: boolean; ttsCh: number | null; voice: boolean; vMin: number | null; store: number | null }> = {
+    FREE: { vision: true, imgReq: 2, imgDay: 10, ocr: true, ocrMo: 20, stt: false, audMin: 0, tts: false, ttsCh: 0, voice: false, vMin: 0, store: 100 * MB },
+    PRO: { vision: true, imgReq: 6, imgDay: 200, ocr: true, ocrMo: 500, stt: true, audMin: 300, tts: true, ttsCh: 200000, voice: true, vMin: 120, store: 5 * GB },
+    BUSINESS: { vision: true, imgReq: 10, imgDay: 2000, ocr: true, ocrMo: 5000, stt: true, audMin: 3000, tts: true, ttsCh: 2000000, voice: true, vMin: 1000, store: 50 * GB },
+    ENTERPRISE: { vision: true, imgReq: 20, imgDay: null, ocr: true, ocrMo: null, stt: true, audMin: null, tts: true, ttsCh: null, voice: true, vMin: null, store: null },
+    ADMIN: { vision: true, imgReq: 20, imgDay: null, ocr: true, ocrMo: null, stt: true, audMin: null, tts: true, ttsCh: null, voice: true, vMin: null, store: null },
+  };
+  for (const [slug, m] of Object.entries(mm)) {
+    await db
+      .update(plans)
+      .set({ visionEnabled: m.vision, maxImagesPerRequest: m.imgReq, imageUploadsPerDay: m.imgDay, ocrEnabled: m.ocr, ocrPagesPerMonth: m.ocrMo, speechToTextEnabled: m.stt, audioMinutesPerMonth: m.audMin, textToSpeechEnabled: m.tts, ttsCharactersPerMonth: m.ttsCh, voiceModeEnabled: m.voice, voiceMinutesPerMonth: m.vMin, mediaStorageBytesLimit: m.store })
+      .where(eq(plans.slug, slug));
+  }
+
+  // Phase 14 — seed the logical voice registry (English + Arabic).
+  for (const v of MEDIA_VOICES) {
+    await db.insert(voiceProfiles).values(v).onConflictDoNothing();
+  }
+
   // Give the seeded admin the ADMIN plan (entitlement via plan, not a bypass).
   const adminEmail = process.env.SEED_ADMIN_EMAIL || 'admin@biina.local';
   await db.update(users).set({ plan: 'ADMIN' }).where(eq(users.email, adminEmail));
 
-  console.log('✓ plans seeded (FREE/PRO/BUSINESS/ENTERPRISE/ADMIN) + RAG/web/connector/agent/workflow/memory entitlements');
+  console.log('✓ plans seeded (FREE/PRO/BUSINESS/ENTERPRISE/ADMIN) + RAG/web/connector/agent/workflow/memory/multimodal entitlements + voices');
 }
 
 /**

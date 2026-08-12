@@ -142,6 +142,8 @@ export const messages = pgTable(
     citations: jsonb('citations').$type<
       Array<{ n: number; documentId: string; documentName: string; page?: number | null; sectionTitle?: string | null; chunkId: string; knowledgeBaseId: string }>
     >(),
+    // Phase 14 — references to attached media assets (image/audio). NOT the bytes.
+    mediaAssetIds: jsonb('media_asset_ids').$type<string[]>(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -405,6 +407,19 @@ export const plans = pgTable('plans', {
   autoMemoryEnabled: boolean('auto_memory_enabled').notNull().default(false),
   organizationMemoryEnabled: boolean('organization_memory_enabled').notNull().default(false),
   memoryRetentionDays: integer('memory_retention_days'),
+  // Phase 14 — multimodal entitlements. null = unlimited for a limit.
+  visionEnabled: boolean('vision_enabled').notNull().default(false),
+  maxImagesPerRequest: integer('max_images_per_request'),
+  imageUploadsPerDay: integer('image_uploads_per_day'),
+  ocrEnabled: boolean('ocr_enabled').notNull().default(false),
+  ocrPagesPerMonth: integer('ocr_pages_per_month'),
+  speechToTextEnabled: boolean('speech_to_text_enabled').notNull().default(false),
+  audioMinutesPerMonth: integer('audio_minutes_per_month'),
+  textToSpeechEnabled: boolean('text_to_speech_enabled').notNull().default(false),
+  ttsCharactersPerMonth: integer('tts_characters_per_month'),
+  voiceModeEnabled: boolean('voice_mode_enabled').notNull().default(false),
+  voiceMinutesPerMonth: integer('voice_minutes_per_month'),
+  mediaStorageBytesLimit: bigint('media_storage_bytes_limit', { mode: 'number' }),
   // Routing priority class (lower = higher priority). Readiness for priority routing.
   priorityClass: integer('priority_class').notNull().default(100),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -1683,3 +1698,125 @@ export type MemoryRevision = typeof memoryRevisions.$inferSelect;
 export type MemoryCandidate = typeof memoryCandidates.$inferSelect;
 export type MemoryUsage = typeof memoryUsage.$inferSelect;
 export type ConversationSummary = typeof conversationSummaries.$inferSelect;
+
+// ==========================================================================
+// Phase 14 — multimodal (vision, OCR, audio, voice).
+//
+// BIINA stays the orchestration layer: modalities go through PROVIDER-INDEPENDENT
+// services (Vision / OCR / STT / TTS), never a single vendor. Media BYTES live in
+// the file-storage abstraction (opaque, server-only keys); DB rows hold references
+// + safe metadata. Text extracted from images/audio (OCR / transcripts) is UNTRUSTED
+// content and follows the same prompt-injection rules as RAG/web/connected. Media is
+// tenant-isolated (personal XOR org) and never authorizes an action.
+// ==========================================================================
+
+export const mediaType = pgEnum('media_type', ['IMAGE', 'AUDIO', 'VIDEO']);
+export const mediaStatus = pgEnum('media_status', ['UPLOADED', 'QUEUED', 'PROCESSING', 'READY', 'FAILED', 'DELETED']);
+export const mediaJobType = pgEnum('media_job_type', ['OCR', 'TRANSCRIBE']);
+
+/** An uploaded media asset. Bytes live in storage; this row holds refs + metadata. */
+export const mediaAssets = pgTable(
+  'media_assets',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    ownerUserId: uuid('owner_user_id').references(() => users.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+    uploadedByUserId: uuid('uploaded_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    conversationId: uuid('conversation_id'),
+    mediaType: mediaType('media_type').notNull(),
+    mimeType: varchar('mime_type', { length: 160 }).notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    storageProvider: varchar('storage_provider', { length: 32 }).notNull(),
+    storageKey: varchar('storage_key', { length: 400 }).notNull(),
+    sha256: varchar('sha256', { length: 64 }),
+    width: integer('width'),
+    height: integer('height'),
+    durationMs: integer('duration_ms'),
+    status: mediaStatus('status').notNull().default('UPLOADED'),
+    failureReason: varchar('failure_reason', { length: 400 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (t) => ({
+    ownerIdx: index('media_owner_idx').on(t.ownerUserId),
+    orgIdx: index('media_org_idx').on(t.organizationId),
+    convIdx: index('media_conversation_idx').on(t.conversationId),
+    typeIdx: index('media_type_idx').on(t.mediaType),
+    statusIdx: index('media_status_idx').on(t.status),
+  }),
+);
+
+/** Background OCR / transcription jobs (durable; idempotent per media+type). */
+export const mediaProcessingJobs = pgTable(
+  'media_processing_jobs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    mediaAssetId: uuid('media_asset_id').notNull().references(() => mediaAssets.id, { onDelete: 'cascade' }),
+    jobType: mediaJobType('job_type').notNull(),
+    status: mediaStatus('status').notNull().default('QUEUED'),
+    attempt: integer('attempt').notNull().default(1),
+    error: varchar('error', { length: 400 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+  },
+  (t) => ({ jobUnique: unique('media_jobs_unique').on(t.mediaAssetId, t.jobType) }),
+);
+
+/** Normalized transcript for an audio asset (untrusted text). Segments optional. */
+export const audioTranscripts = pgTable('audio_transcripts', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  mediaAssetId: uuid('media_asset_id').notNull().unique().references(() => mediaAssets.id, { onDelete: 'cascade' }),
+  text: text('text').notNull(),
+  language: varchar('language', { length: 16 }),
+  segments: jsonb('segments').$type<Array<{ start: number; end: number; text: string; speaker?: string }>>(),
+  durationMs: integer('duration_ms'),
+  confidence: real('confidence'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Logical voice registry — BIINA voice identities mapped to provider voices. */
+export const voiceProfiles = pgTable('voice_profiles', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  slug: varchar('slug', { length: 48 }).notNull().unique(),
+  displayName: varchar('display_name', { length: 80 }).notNull(),
+  provider: varchar('provider', { length: 32 }).notNull(),
+  providerVoiceId: varchar('provider_voice_id', { length: 96 }).notNull(),
+  language: varchar('language', { length: 16 }).notNull().default('en'),
+  locale: varchar('locale', { length: 16 }),
+  enabled: boolean('enabled').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Multimodal operation metering — metadata only, never media content. */
+export const mediaUsageEvents = pgTable(
+  'media_usage_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    operation: varchar('operation', { length: 24 }).notNull(), // VISION | OCR | SPEECH_TO_TEXT | TEXT_TO_SPEECH | VOICE_SESSION
+    userId: uuid('user_id'),
+    organizationId: uuid('organization_id'),
+    mediaAssetId: uuid('media_asset_id'),
+    provider: varchar('provider', { length: 48 }),
+    // Provider-reported units (never invented): images / pixels / seconds / characters.
+    units: integer('units'),
+    unitKind: varchar('unit_kind', { length: 24 }),
+    estimatedCost: real('estimated_cost'),
+    currency: varchar('currency', { length: 8 }).notNull().default('USD'),
+    success: boolean('success').notNull(),
+    errorCode: varchar('error_code', { length: 48 }),
+    requestId: uuid('request_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index('media_usage_user_idx').on(t.userId),
+    opIdx: index('media_usage_op_idx').on(t.operation),
+    createdIdx: index('media_usage_created_idx').on(t.createdAt),
+  }),
+);
+
+export type MediaAsset = typeof mediaAssets.$inferSelect;
+export type MediaProcessingJob = typeof mediaProcessingJobs.$inferSelect;
+export type AudioTranscript = typeof audioTranscripts.$inferSelect;
+export type VoiceProfile = typeof voiceProfiles.$inferSelect;
+export type MediaUsageEvent = typeof mediaUsageEvents.$inferSelect;

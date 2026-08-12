@@ -92,7 +92,15 @@ export type SecurityEventType =
   | 'memory.consent_changed'
   | 'memory.candidate_created'
   | 'memory.candidate_rejected'
-  | 'memory.poisoning_blocked';
+  | 'memory.poisoning_blocked'
+  // Phase 14 — multimodal (vision / OCR / audio / voice).
+  | 'media.uploaded'
+  | 'media.deleted'
+  | 'media.vision'
+  | 'media.ocr'
+  | 'media.transcribed'
+  | 'media.synthesized'
+  | 'media.rejected';
 
 export async function logSecurityEvent(entry: {
   event: SecurityEventType;

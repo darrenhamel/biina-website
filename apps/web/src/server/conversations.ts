@@ -77,6 +77,7 @@ export async function addMessage(params: {
   provider?: string;
   model?: string;
   citations?: unknown;
+  mediaAssetIds?: string[];
 }) {
   const db = getDb();
   const [row] = await db

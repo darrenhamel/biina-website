@@ -22,6 +22,7 @@ import type { WebCitation } from '@/server/web/grounding';
 import { searchConnectedSources, type ConnectorCitation } from '@/server/connectors/connected-search';
 import { assembleContext } from '@/server/memory/context-engine';
 import { handleExplicitMemory, maybeExtractCandidates } from '@/server/memory/commands';
+import { assembleMediaContext } from '@/server/media/context';
 import { isWorkload } from '@/config/ai-routing';
 import { chatRequestSchema } from '@/lib/validation';
 import { WORKSPACE_COOKIE } from '@/server/org/constants';
@@ -45,7 +46,7 @@ export async function POST(req: NextRequest) {
     const user = await getCurrentUser();
     if (!user) return unauthorized();
 
-    const { conversationId, message, model, workload, knowledgeBaseIds, ragMode, webSearch, freshness, connectionIds, temporary } = chatRequestSchema.parse(await req.json());
+    const { conversationId, message, model, workload, knowledgeBaseIds, ragMode, webSearch, freshness, connectionIds, temporary, mediaIds } = chatRequestSchema.parse(await req.json());
 
     // Resolve the active workspace from a cookie and VERIFY membership server-side
     // (never trust a browser-supplied org id). A suspended org blocks new AI usage.
@@ -73,7 +74,30 @@ export async function POST(req: NextRequest) {
     }
     const finalConvId = convId;
 
-    await addMessage({ conversationId: finalConvId, role: 'user', content: message });
+    // Plan is resolved up front (memory + media gating need it); it's cached.
+    const plan = await getPlan(user.plan);
+
+    // Phase 14 — attached media (images/audio). Access is re-verified per asset.
+    // Images → an "image understanding" + untrusted extracted-text context block;
+    // audio → a transcript appended to the user's own message (trusted user input).
+    let mediaPrompt: SystemPromptContext['media'];
+    let storedContent = message;
+    const wantMedia = Boolean(mediaIds && mediaIds.length > 0);
+    if (wantMedia) {
+      try {
+        const mm = await assembleMediaContext({ mediaIds: mediaIds!, userId: user.id, organizationId: orgId, prompt: message, plan, signal: req.signal });
+        mediaPrompt = mm.media;
+        if (mm.userTranscript) storedContent = `${message}\n${mm.userTranscript}`.trim();
+      } catch (err) {
+        const ge = toGatewayError(err);
+        if (ge.code === 'not_entitled' || ge.code === 'quota_exceeded') {
+          return NextResponse.json({ error: ge.userMessage(), code: ge.code }, { status: ge.httpStatus() });
+        }
+        logger.warn('ai.chat.media_context_failed', { error: String(err) });
+      }
+    }
+
+    await addMessage({ conversationId: finalConvId, role: 'user', content: storedContent, mediaAssetIds: wantMedia ? mediaIds : undefined });
     const history = await listMessages(finalConvId);
     const chatMessages: ChatMessage[] = history.map((m) => ({ role: m.role, content: m.content }));
 
@@ -89,8 +113,6 @@ export async function POST(req: NextRequest) {
     const mode: RagMode = ragMode === 'strict' ? 'strict' : 'blended';
     const wantRag = Boolean(knowledgeBaseIds && knowledgeBaseIds.length > 0 && ragMode !== 'off');
     const wantConnected = Boolean(connectionIds && connectionIds.length > 0);
-    // Plan is always resolved now (memory gating needs it); it's cached.
-    const plan = await getPlan(user.plan);
 
     // Phase 13 — explicit "remember/forget" commands are handled reliably + up front
     // (personal scope only). They short-circuit with a confirmation reply.
@@ -197,12 +219,14 @@ export async function POST(req: NextRequest) {
       routeContext,
       signal: req.signal,
       conversationId: finalConvId,
-      promptContext: { personaId: user.personaId, locale: user.locale, rag: ragPrompt, web: webPrompt, connected: connectedPrompt, personalization: personalizationPrompt, memory: memoryPrompt },
+      promptContext: { personaId: user.personaId, locale: user.locale, rag: ragPrompt, web: webPrompt, connected: connectedPrompt, personalization: personalizationPrompt, memory: memoryPrompt, media: mediaPrompt },
     });
 
     // Internal answer mode (helps citations/metering/UI). CONNECTED wins the label
     // when present; otherwise web/rag as before.
-    const answerMode = connectedPrompt
+    const answerMode = mediaPrompt
+      ? 'MULTIMODAL'
+      : connectedPrompt
       ? 'CONNECTED_GROUNDED'
       : webPrompt && ragPrompt
         ? 'PRIVATE_RAG_AND_WEB'

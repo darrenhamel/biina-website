@@ -46,6 +46,8 @@ export const chatRequestSchema = z.object({
   connectionIds: z.array(z.string().uuid()).max(8).optional(),
   // Phase 13 — temporary chat: no durable memory retrieval + no memory creation.
   temporary: z.boolean().optional(),
+  // Phase 14 — attached media (image/audio); access re-verified server-side.
+  mediaIds: z.array(z.string().uuid()).max(12).optional(),
 });
 
 export const renameConversationSchema = z.object({
@@ -358,6 +360,27 @@ export const memorySettingsSchema = z
   .strict();
 
 export const candidateDecisionSchema = z.object({ decision: z.enum(['ACCEPTED', 'REJECTED']), confirmSensitive: z.boolean().optional() }).strict();
+
+// ---- Phase 14: multimodal ----
+
+export const ttsRequestSchema = z
+  .object({
+    text: z.string().trim().min(1).max(20_000).optional(),
+    messageId: z.string().uuid().optional(),
+    voiceSlug: z.string().max(48).optional(),
+    language: z.enum(['en', 'ar']).optional(),
+  })
+  .strict()
+  .refine((v) => v.text || v.messageId, { message: 'text or messageId is required' });
+
+export const voiceMediaSettingsSchema = z
+  .object({
+    voiceResponsesEnabled: z.boolean().optional(),
+    preferredVoice: z.string().max(48).optional(),
+    playbackSpeed: z.number().min(0.5).max(2).optional(),
+    autoPlayInVoiceMode: z.boolean().optional(),
+  })
+  .strict();
 
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
