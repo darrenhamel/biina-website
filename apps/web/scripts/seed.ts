@@ -311,6 +311,21 @@ async function seedPlans(db: DB) {
       .where(eq(plans.slug, slug));
   }
 
+  // Phase 9 — web-search entitlements per tier (configurable placeholders).
+  const web: Record<string, { on: boolean; day: number | null; month: number | null; sources: number | null; fresh: boolean }> = {
+    FREE: { on: true, day: 10, month: 100, sources: 3, fresh: false },
+    PRO: { on: true, day: 100, month: 2000, sources: 5, fresh: true },
+    BUSINESS: { on: true, day: 500, month: 10000, sources: 6, fresh: true },
+    ENTERPRISE: { on: true, day: null, month: null, sources: 8, fresh: true },
+    ADMIN: { on: true, day: null, month: null, sources: 8, fresh: true },
+  };
+  for (const [slug, w] of Object.entries(web)) {
+    await db
+      .update(plans)
+      .set({ webSearchEligible: w.on, webSearchEnabled: w.on, dailyWebSearches: w.day, monthlyWebSearches: w.month, maxSourcesPerRequest: w.sources, freshnessFiltersEnabled: w.fresh })
+      .where(eq(plans.slug, slug));
+  }
+
   // Give the seeded admin the ADMIN plan (entitlement via plan, not a bypass).
   const adminEmail = process.env.SEED_ADMIN_EMAIL || 'admin@biina.local';
   await db.update(users).set({ plan: 'ADMIN' }).where(eq(users.email, adminEmail));

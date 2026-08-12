@@ -8,9 +8,10 @@ import { Icon } from '@/components/Icon';
 import { BrandMark } from '@/components/Logo';
 import { KnowledgeSelector, type RagMode } from './KnowledgeSelector';
 
-interface Citation {
+interface DocumentCitation {
   n: number;
-  documentId: string;
+  sourceType?: 'document';
+  documentId?: string;
   documentName: string;
   page?: number | null;
   sectionTitle?: string | null;
@@ -18,12 +19,31 @@ interface Citation {
   knowledgeBaseId?: string;
 }
 
+interface WebCitation {
+  n: number;
+  sourceType: 'web';
+  title?: string;
+  url: string;
+  domain?: string;
+  publishedAt?: string | null;
+  retrievedAt?: string | null;
+  sourceId?: string;
+  kind?: string;
+}
+
+type Citation = DocumentCitation | WebCitation;
+
+const isWebCitation = (c: Citation): c is WebCitation => c.sourceType === 'web';
+
+type Freshness = 'any' | 'day' | 'week' | 'month' | 'year';
+
 interface UiMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   streaming?: boolean;
   citations?: Citation[];
+  webSearched?: boolean;
 }
 
 let tempCounter = 0;
@@ -55,6 +75,10 @@ export function ChatWorkspace({
   // Knowledge (RAG) selection for grounding answers.
   const [knowledgeBaseIds, setKnowledgeBaseIds] = useState<string[]>([]);
   const [ragMode, setRagMode] = useState<RagMode>('off');
+  // Live web-search grounding (vendor stays hidden).
+  const [webSearch, setWebSearch] = useState(false);
+  const [freshness, setFreshness] = useState<Freshness>('any');
+  const [searching, setSearching] = useState(false);
 
   // Keep state in sync when navigating between conversations.
   useEffect(() => {
@@ -97,7 +121,9 @@ export function ChatWorkspace({
     abortRef.current = controller;
     const hadConversation = Boolean(convIdRef.current);
     const useRag = knowledgeBaseIds.length > 0 && ragMode !== 'off';
+    if (webSearch) setSearching(true);
     let citations: Citation[] | undefined;
+    let webSearched = false;
 
     try {
       const res = await fetch('/api/ai/chat', {
@@ -108,6 +134,7 @@ export function ChatWorkspace({
           message: content,
           model: model || undefined,
           ...(useRag ? { knowledgeBaseIds, ragMode } : {}),
+          ...(webSearch ? { webSearch: true, freshness } : {}),
         }),
         signal: controller.signal,
       });
@@ -119,6 +146,12 @@ export function ChatWorkspace({
 
       const newConvId = res.headers.get('X-Biina-Conversation-Id') ?? undefined;
       if (newConvId) convIdRef.current = newConvId;
+
+      const answerMode = res.headers.get('X-Biina-Answer-Mode') ?? '';
+      webSearched = answerMode.includes('WEB');
+      setMessages((prev) =>
+        prev.map((m) => (m.id === assistantMsg.id ? { ...m, webSearched } : m)),
+      );
 
       const citHeader = res.headers.get('X-Biina-Citations');
       if (citHeader) {
@@ -135,6 +168,7 @@ export function ChatWorkspace({
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
+        setSearching(false);
         const chunk = decoder.decode(value, { stream: true });
         setMessages((prev) =>
           prev.map((m) => (m.id === assistantMsg.id ? { ...m, content: m.content + chunk } : m)),
@@ -146,11 +180,12 @@ export function ChatWorkspace({
       }
     } finally {
       setBusy(false);
+      setSearching(false);
       abortRef.current = null;
       setMessages((prev) =>
         prev.map((m) =>
           m.id === assistantMsg.id
-            ? { ...m, streaming: false, citations: citations ?? m.citations }
+            ? { ...m, streaming: false, citations: citations ?? m.citations, webSearched }
             : m,
         ),
       );
@@ -188,7 +223,7 @@ export function ChatWorkspace({
         ) : (
           <div className="mx-auto w-full max-w-3xl px-4 py-6 md:px-6">
             {messages.map((m) => (
-              <MessageRow key={m.id} message={m} dict={dict} />
+              <MessageRow key={m.id} message={m} dict={dict} locale={locale} searching={searching} />
             ))}
             {error && (
               <div className="mx-auto my-3 max-w-prose rounded-xl bg-danger/10 px-4 py-3 text-sm text-danger">
@@ -218,6 +253,10 @@ export function ChatWorkspace({
         setKnowledgeBaseIds={setKnowledgeBaseIds}
         ragMode={ragMode}
         setRagMode={setRagMode}
+        webSearch={webSearch}
+        setWebSearch={setWebSearch}
+        freshness={freshness}
+        setFreshness={setFreshness}
       />
     </div>
   );
@@ -251,8 +290,19 @@ function EmptyState({ dict, onPick }: { dict: Dictionary; onPick: (p: string) =>
   );
 }
 
-function MessageRow({ message, dict }: { message: UiMessage; dict: Dictionary }) {
+function MessageRow({
+  message,
+  dict,
+  locale,
+  searching,
+}: {
+  message: UiMessage;
+  dict: Dictionary;
+  locale: Locale;
+  searching: boolean;
+}) {
   const isUser = message.role === 'user';
+  const isSearching = !isUser && searching && message.streaming && message.content.length === 0;
   return (
     <div className="group py-4">
       <div className="flex gap-3">
@@ -268,17 +318,28 @@ function MessageRow({ message, dict }: { message: UiMessage; dict: Dictionary })
           <p className="mb-1 text-xs font-semibold text-ink-soft">
             {isUser ? dict.chat.you : dict.chat.assistant}
           </p>
+          {!isUser && message.webSearched && (
+            <span className="mb-1.5 inline-flex items-center gap-1 rounded-full bg-accent-soft px-2 py-0.5 text-[11px] font-medium text-accent">
+              <Icon name="globe" width={12} height={12} />
+              {dict.web.searchedWeb}
+            </span>
+          )}
           <div className="prose-chat text-[15px] text-ink">
             {message.content}
             {message.streaming && message.content.length === 0 ? (
-              <span className="text-ink-faint">{dict.chat.thinking}</span>
+              <span className="inline-flex items-center gap-1.5 text-ink-faint">
+                {isSearching && (
+                  <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-line-strong border-t-accent" />
+                )}
+                {isSearching ? dict.web.searching : dict.chat.thinking}
+              </span>
             ) : null}
             {message.streaming && message.content.length > 0 ? (
               <span className="ms-0.5 inline-block h-4 w-1.5 animate-blink bg-accent align-middle" />
             ) : null}
           </div>
           {!isUser && message.citations && message.citations.length > 0 && (
-            <Citations citations={message.citations} dict={dict} />
+            <Citations citations={message.citations} dict={dict} locale={locale} />
           )}
           {!isUser && !message.streaming && message.content.length > 0 && (
             <MessageActions content={message.content} dict={dict} />
@@ -314,23 +375,82 @@ function MessageActions({ content, dict }: { content: string; dict: Dictionary }
   );
 }
 
-function Citations({ citations, dict }: { citations: Citation[]; dict: Dictionary }) {
+function Citations({
+  citations,
+  dict,
+  locale,
+}: {
+  citations: Citation[];
+  dict: Dictionary;
+  locale: Locale;
+}) {
+  const docs = citations.filter((c): c is DocumentCitation => !isWebCitation(c));
+  const webs = citations.filter(isWebCitation);
+  const fmtDate = new Intl.DateTimeFormat(locale === 'ar' ? 'ar-AE' : 'en-US', {
+    dateStyle: 'medium',
+  });
+
   return (
-    <div className="mt-3 rounded-xl border border-line bg-paper-sunken px-3 py-2">
-      <p className="text-xs font-semibold text-ink-soft">{dict.rag.sources}</p>
-      <ul className="mt-1 space-y-0.5">
-        {citations.map((c) => (
-          <li key={`${c.n}-${c.chunkId ?? c.documentId}`} className="text-xs text-ink-soft">
-            <span className="font-semibold text-ink">[{c.n}]</span> {c.documentName}
-            {c.page != null && (
-              <span className="text-ink-faint">
-                {' '}
-                — {dict.rag.page} {c.page}
-              </span>
-            )}
-          </li>
-        ))}
-      </ul>
+    <div className="mt-3 space-y-2">
+      {docs.length > 0 && (
+        <div className="rounded-xl border border-line bg-paper-sunken px-3 py-2">
+          <p className="text-xs font-semibold text-ink-soft">{dict.rag.sources}</p>
+          <ul className="mt-1 space-y-0.5">
+            {docs.map((c) => (
+              <li key={`d-${c.n}-${c.chunkId ?? c.documentId}`} className="text-xs text-ink-soft">
+                <span className="font-semibold text-ink">[{c.n}]</span> {c.documentName}
+                {c.page != null && (
+                  <span className="text-ink-faint">
+                    {' '}
+                    — {dict.rag.page} {c.page}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {webs.length > 0 && (
+        <div className="rounded-xl border border-line bg-paper-sunken px-3 py-2">
+          <p className="flex items-center gap-1.5 text-xs font-semibold text-ink-soft">
+            <Icon name="globe" width={12} height={12} />
+            {dict.web.sources}
+          </p>
+          <ul className="mt-1 space-y-1">
+            {webs.map((c) => {
+              const isPublic = /^https?:\/\//i.test(c.url);
+              const label = c.title || c.domain || c.url;
+              return (
+                <li key={`w-${c.n}-${c.sourceId ?? c.url}`} className="text-xs text-ink-soft">
+                  <span className="font-semibold text-ink">[{c.n}]</span>{' '}
+                  {isPublic ? (
+                    <a
+                      href={c.url}
+                      target="_blank"
+                      rel="noreferrer noopener"
+                      className="text-accent underline decoration-line hover:decoration-accent"
+                    >
+                      {label}
+                    </a>
+                  ) : (
+                    <span className="text-ink">{label}</span>
+                  )}
+                  {c.domain && <span className="text-ink-faint"> — {c.domain}</span>}
+                  {c.publishedAt && (
+                    <span className="text-ink-faint"> · {fmtDate.format(new Date(c.publishedAt))}</span>
+                  )}
+                  {c.retrievedAt && (
+                    <span className="text-ink-faint">
+                      {' '}
+                      · {dict.web.retrieved} {fmtDate.format(new Date(c.retrievedAt))}
+                    </span>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
@@ -351,6 +471,10 @@ function Composer({
   setKnowledgeBaseIds,
   ragMode,
   setRagMode,
+  webSearch,
+  setWebSearch,
+  freshness,
+  setFreshness,
 }: {
   dict: Dictionary;
   input: string;
@@ -367,6 +491,10 @@ function Composer({
   setKnowledgeBaseIds: (ids: string[]) => void;
   ragMode: RagMode;
   setRagMode: (mode: RagMode) => void;
+  webSearch: boolean;
+  setWebSearch: (v: boolean) => void;
+  freshness: Freshness;
+  setFreshness: (v: Freshness) => void;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -415,7 +543,7 @@ function Composer({
             </button>
           </div>
         )}
-        <div className="mb-2 flex items-center">
+        <div className="mb-2 flex flex-wrap items-center gap-2">
           <KnowledgeSelector
             dict={dict}
             selected={knowledgeBaseIds}
@@ -423,6 +551,32 @@ function Composer({
             mode={ragMode}
             onModeChange={setRagMode}
           />
+          <button
+            type="button"
+            onClick={() => setWebSearch(!webSearch)}
+            aria-pressed={webSearch}
+            className={`gap-1.5 px-3 py-1.5 text-xs ${webSearch ? 'btn-primary' : 'btn-outline'}`}
+          >
+            <Icon name="globe" width={14} height={14} />
+            <span className="truncate">{webSearch ? dict.web.on : dict.web.search}</span>
+          </button>
+          {webSearch && (
+            <label className="inline-flex items-center gap-1.5 text-xs text-ink-soft">
+              <span className="sr-only">{dict.web.freshness}</span>
+              <select
+                value={freshness}
+                onChange={(e) => setFreshness(e.target.value as Freshness)}
+                className="rounded-lg border border-line bg-paper-raised px-2 py-1 text-xs text-ink focus:border-accent focus:outline-none"
+                aria-label={dict.web.freshness}
+              >
+                <option value="any">{dict.web.freshAny}</option>
+                <option value="day">{dict.web.freshDay}</option>
+                <option value="week">{dict.web.freshWeek}</option>
+                <option value="month">{dict.web.freshMonth}</option>
+                <option value="year">{dict.web.freshYear}</option>
+              </select>
+            </label>
+          )}
         </div>
         <div className="flex items-end gap-2 rounded-2xl border border-line-strong bg-paper-raised p-2 focus-within:border-accent">
           <textarea

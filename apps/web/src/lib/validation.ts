@@ -39,6 +39,9 @@ export const chatRequestSchema = z.object({
   // Phase 8 — optional knowledge-base selection for RAG (access re-verified server-side).
   knowledgeBaseIds: z.array(z.string().uuid()).max(20).optional(),
   ragMode: z.enum(['off', 'strict', 'blended']).optional(),
+  // Phase 9 — opt-in web search (user-controlled). Entitlement/quota enforced server-side.
+  webSearch: z.boolean().optional(),
+  freshness: z.enum(['any', 'day', 'week', 'month', 'year']).optional(),
 });
 
 export const renameConversationSchema = z.object({

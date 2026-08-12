@@ -344,6 +344,50 @@ Details: [`FILES.md`](./FILES.md) · [`KNOWLEDGE_BASES.md`](./KNOWLEDGE_BASES.md
 [`RAG_ARCHITECTURE.md`](./RAG_ARCHITECTURE.md) · [`VECTOR_STORAGE.md`](./VECTOR_STORAGE.md) ·
 [`EMBEDDINGS.md`](./EMBEDDINGS.md) · [`RAG_SECURITY.md`](./RAG_SECURITY.md).
 
+## 4f. Web search & live grounding (Phase 9)
+
+Grounds a chat in the **live public web** — context infrastructure, not a
+provider. The LLM never browses directly; every public-web access passes through
+BIINA.ai server components, and grounding never bypasses Phase 4 routing or Phase
+5 quotas. Reuses Phase 8's citation + injection-framing machinery.
+
+```
+Chat → user opt-in web toggle → WebSearchService → WebSearchProvider (search)
+     → dedupe + bounded selection → WebPageFetcher (SSRF-guarded)
+     → WebContentExtractor → WebGroundingContextBuilder → routing → provider → citations
+```
+
+- **The LLM never browses.** It emits no network requests; search, fetch, and
+  extraction are BIINA server components. Fan-out is bounded (query/result/page
+  budgets) — no autonomous or recursive search loops.
+- **SSRF is structural, not configurable.** Every fetched URL must be http/https
+  and resolve to a **public global-unicast** address; loopback/private/CGNAT/
+  link-local + cloud metadata (`169.254.169.254`)/unique-local/internal hostnames
+  are blocked, **re-validated on every redirect**, and re-resolved before connect
+  to narrow DNS-rebinding. Byte cap, time budgets, content-type allowlist,
+  identifiable UA, no credentials — never a generic proxy.
+- **Public/private separation.** The query sent to the provider is the **user's
+  question only** — never private document text or conversations; org data is
+  never sent to a search vendor. Public web sources and private knowledge stay in
+  separate labeled blocks; the model surfaces conflicts instead of merging them.
+- **Injection defense.** Fetched pages are **untrusted data, not instructions**;
+  the server-authoritative policy tells the model never to follow in-page
+  instructions, reveal secrets, exfiltrate, or take actions. Citations reference
+  http/https public URLs (never internal/proxy URLs), recording a retrieved-on
+  date; audit rows (`web_search_requests`) record counts, never page bodies.
+- **Portable default, production path.** Ships a deterministic **mock** search
+  provider (no key, no network) so the full pipeline, SSRF, injection defense,
+  quotas, and citations run/test anywhere; a real vendor (Brave/Tavily/Bing) is a
+  `GenericJsonSearchProvider` adapter + env away. Gated by `WEB_SEARCH_ENABLED`
+  (off by default) and per-plan web-search quotas + `maxSourcesPerRequest`. The
+  chat route sets an answer mode (`MODEL_ONLY`/`PRIVATE_RAG`/`WEB_GROUNDED`/
+  `PRIVATE_RAG_AND_WEB`) via `X-Biina-Answer-Mode`; non-quota web failures degrade
+  gracefully (answer without web).
+
+Details: [`WEB_SEARCH.md`](./WEB_SEARCH.md) · [`WEB_GROUNDING.md`](./WEB_GROUNDING.md) ·
+[`WEB_SECURITY.md`](./WEB_SECURITY.md) · [`CITATIONS.md`](./CITATIONS.md) ·
+[`SEARCH_PROVIDER.md`](./SEARCH_PROVIDER.md).
+
 ### System prompt (server-side, layered)
 
 Assembled entirely on the server (`apps/web/src/server/ai/system-prompt.ts`),

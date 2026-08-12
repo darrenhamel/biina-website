@@ -50,6 +50,13 @@
       "when": 1786523572507,
       "tag": "0006_complex_texas_twister",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786541396450,
+      "tag": "0007_lucky_shiva",
+      "breakpoints": true
     }
   ]
 }

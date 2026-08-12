@@ -39,6 +39,11 @@ const FALLBACK_FREE: Plan = {
   maxFiles: null,
   maxKnowledgeBases: null,
   storageBytesLimit: null,
+  webSearchEnabled: false,
+  dailyWebSearches: null,
+  monthlyWebSearches: null,
+  maxSourcesPerRequest: null,
+  freshnessFiltersEnabled: false,
   priorityClass: 100,
   updatedAt: new Date(0),
 };

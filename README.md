@@ -283,5 +283,24 @@ Phase 5 quotas. See [`docs/FILES.md`](./docs/FILES.md),
 [`docs/EMBEDDINGS.md`](./docs/EMBEDDINGS.md), and
 [`docs/RAG_SECURITY.md`](./docs/RAG_SECURITY.md).
 
-**Deferred:** live payment activation, marketplace/payouts, web search, and later
-phases. See [`docs/ROADMAP.md`](./docs/ROADMAP.md).
+**Added (Phase 9):** **web search & live grounding** — chat grounded in the live
+public web. A user-opt-in pipeline (search → bounded source selection →
+SSRF-guarded fetch → extract → ground → cite) where the **LLM never browses
+directly** — every fetch passes through BIINA server components with structural
+SSRF protection (public addresses only, re-validated on every redirect), and page
+content is **untrusted data, not instructions**. The query sent to the search
+provider is the user's question only; public web and private knowledge stay
+separate with conflicts surfaced. Unified citations across private documents and
+web pages (with "Retrieved on [date]"), an answer mode header, and plan-gated
+web-search quotas. A deterministic **mock** provider runs and tests the whole
+pipeline offline; a real vendor (Brave/Tavily/Bing) is an adapter + env away. Web
+search is context infrastructure and never bypasses Phase 4 routing or Phase 5
+quotas. See [`docs/WEB_SEARCH.md`](./docs/WEB_SEARCH.md),
+[`docs/WEB_GROUNDING.md`](./docs/WEB_GROUNDING.md),
+[`docs/WEB_SECURITY.md`](./docs/WEB_SECURITY.md),
+[`docs/CITATIONS.md`](./docs/CITATIONS.md), and
+[`docs/SEARCH_PROVIDER.md`](./docs/SEARCH_PROVIDER.md).
+
+**Deferred:** live payment activation, marketplace/payouts, a live search-provider
+key (ships on the mock provider), a caching layer for fetched pages, and later
+phases (connectors, pre-launch audit). See [`docs/ROADMAP.md`](./docs/ROADMAP.md).

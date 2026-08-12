@@ -366,6 +366,12 @@ export const plans = pgTable('plans', {
   maxFiles: integer('max_files'),
   maxKnowledgeBases: integer('max_knowledge_bases'),
   storageBytesLimit: bigint('storage_bytes_limit', { mode: 'number' }),
+  // Phase 9 — web search / live grounding. null = unlimited for a limit.
+  webSearchEnabled: boolean('web_search_enabled').notNull().default(false),
+  dailyWebSearches: integer('daily_web_searches'),
+  monthlyWebSearches: integer('monthly_web_searches'),
+  maxSourcesPerRequest: integer('max_sources_per_request'),
+  freshnessFiltersEnabled: boolean('freshness_filters_enabled').notNull().default(false),
   // Routing priority class (lower = higher priority). Readiness for priority routing.
   priorityClass: integer('priority_class').notNull().default(100),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -912,6 +918,45 @@ export type FileRecord = typeof files.$inferSelect;
 export type DocumentChunk = typeof documentChunks.$inferSelect;
 export type NewDocumentChunk = typeof documentChunks.$inferInsert;
 export type RagRequest = typeof ragRequests.$inferSelect;
+
+// ==========================================================================
+// Phase 9 — web search & live information grounding.
+//
+// All public-web access goes through Biina.ai server components (never the LLM
+// or a provider directly). This record is operational metadata only; retention
+// of the raw query is minimized (redaction-ready).
+// ==========================================================================
+
+export const webSearchStatus = pgEnum('web_search_status', ['ok', 'no_results', 'error']);
+
+export const webSearchRequests = pgTable(
+  'web_search_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    requestId: uuid('request_id'),
+    userId: uuid('user_id'),
+    organizationId: uuid('organization_id'),
+    conversationId: uuid('conversation_id'),
+    // Query is retained for debugging; a redaction/minimization policy can null it.
+    query: varchar('query', { length: 500 }),
+    provider: varchar('provider', { length: 48 }),
+    mode: varchar('mode', { length: 24 }),
+    resultCount: integer('result_count'),
+    pagesFetched: integer('pages_fetched'),
+    bytesFetched: integer('bytes_fetched'),
+    fetchFailures: integer('fetch_failures'),
+    status: webSearchStatus('status').notNull().default('ok'),
+    searchLatencyMs: integer('search_latency_ms'),
+    fetchLatencyMs: integer('fetch_latency_ms'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index('web_search_user_idx').on(t.userId),
+    createdIdx: index('web_search_created_idx').on(t.createdAt),
+  }),
+);
+
+export type WebSearchRequest = typeof webSearchRequests.$inferSelect;
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;

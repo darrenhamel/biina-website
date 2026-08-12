@@ -17,6 +17,8 @@ import { getPlan } from '@/server/ai/plans';
 import { retrieveKnowledge } from '@/server/rag/retrieval';
 import { buildRagContext, ragInstructions, type Citation, type RagMode } from '@/server/rag/context-builder';
 import { retrievalConfig } from '@/server/rag/config';
+import { groundWithWeb } from '@/server/web/service';
+import type { WebCitation } from '@/server/web/grounding';
 import { isWorkload } from '@/config/ai-routing';
 import { chatRequestSchema } from '@/lib/validation';
 import { WORKSPACE_COOKIE } from '@/server/org/constants';
@@ -40,7 +42,7 @@ export async function POST(req: NextRequest) {
     const user = await getCurrentUser();
     if (!user) return unauthorized();
 
-    const { conversationId, message, model, workload, knowledgeBaseIds, ragMode } = chatRequestSchema.parse(await req.json());
+    const { conversationId, message, model, workload, knowledgeBaseIds, ragMode, webSearch, freshness } = chatRequestSchema.parse(await req.json());
 
     // Resolve the active workspace from a cookie and VERIFY membership server-side
     // (never trust a browser-supplied org id). A suspended org blocks new AI usage.
@@ -72,28 +74,55 @@ export async function POST(req: NextRequest) {
     const history = await listMessages(finalConvId);
     const chatMessages: ChatMessage[] = history.map((m) => ({ role: m.role, content: m.content }));
 
-    // ---- RAG: retrieve grounded context (server-trusted scope + access) ----
-    // Knowledge is used ONLY when the user selects KBs, their plan permits RAG,
-    // and mode isn't 'off'. Access + tenant scope are re-verified in retrieval.
+    // ---- Grounding: private knowledge (RAG) and/or live web ----
+    // Both are opt-in, plan-gated, and kept DISTINCT. The web query is the user's
+    // message ONLY — private document text is never sent to a search provider.
     let ragPrompt: SystemPromptContext['rag'];
-    let citations: Citation[] = [];
+    let webPrompt: SystemPromptContext['web'];
+    const ragCitations: Array<Citation & { sourceType: 'document' }> = [];
+    let webCitations: WebCitation[] = [];
     const mode: RagMode = ragMode === 'strict' ? 'strict' : 'blended';
-    if (knowledgeBaseIds && knowledgeBaseIds.length > 0 && ragMode !== 'off') {
-      const plan = await getPlan(user.plan);
-      if (plan.ragEnabled) {
-        const { results } = await retrieveKnowledge({
-          query: message,
+    const wantRag = Boolean(knowledgeBaseIds && knowledgeBaseIds.length > 0 && ragMode !== 'off');
+    const plan = wantRag || webSearch ? await getPlan(user.plan) : null;
+
+    if (wantRag && plan?.ragEnabled) {
+      const { results } = await retrieveKnowledge({
+        query: message,
+        userId: user.id,
+        organizationId: orgId,
+        knowledgeBaseIds: knowledgeBaseIds!,
+        conversationId: finalConvId,
+      });
+      const built = buildRagContext(results, { maxContextTokens: retrievalConfig().maxContextTokens });
+      ragCitations.push(...built.citations.map((c) => ({ ...c, sourceType: 'document' as const })));
+      ragPrompt = { instructions: ragInstructions(mode, built.hasEvidence), contextBlock: built.contextBlock };
+      await setConversationKnowledge(finalConvId, knowledgeBaseIds!, mode).catch(() => {});
+    }
+
+    if (webSearch && plan?.webSearchEnabled) {
+      try {
+        const web = await groundWithWeb({
+          query: message, // user's question only — never private content
           userId: user.id,
           organizationId: orgId,
-          knowledgeBaseIds,
+          plan,
           conversationId: finalConvId,
+          freshness,
+          signal: req.signal,
         });
-        const built = buildRagContext(results, { maxContextTokens: retrievalConfig().maxContextTokens });
-        citations = built.citations;
-        ragPrompt = { instructions: ragInstructions(mode, built.hasEvidence), contextBlock: built.contextBlock };
-        await setConversationKnowledge(finalConvId, knowledgeBaseIds, mode).catch(() => {});
+        webCitations = web.citations;
+        webPrompt = { instructions: web.instructions, contextBlock: web.contextBlock };
+      } catch (err) {
+        // Quota/entitlement errors surface to the client; other failures degrade
+        // gracefully (answer without web) rather than failing the whole request.
+        const ge = toGatewayError(err);
+        if (ge.code === 'quota_exceeded' || ge.code === 'not_entitled') {
+          return NextResponse.json({ error: ge.userMessage(), code: ge.code, ...(ge.data ? { data: ge.data } : {}) }, { status: ge.httpStatus() });
+        }
+        logger.warn('ai.chat.web_grounding_failed', { error: String(err) });
       }
     }
+    const citations = [...ragCitations, ...webCitations];
 
     // Build a validated routing context. Privileged fields (plan, isAdmin, org)
     // come from the authenticated session / verified membership, NOT the body.
@@ -113,8 +142,11 @@ export async function POST(req: NextRequest) {
       routeContext,
       signal: req.signal,
       conversationId: finalConvId,
-      promptContext: { personaId: user.personaId, locale: user.locale, rag: ragPrompt },
+      promptContext: { personaId: user.personaId, locale: user.locale, rag: ragPrompt, web: webPrompt },
     });
+
+    // Internal answer mode (helps citations/metering/UI): private RAG and/or web.
+    const answerMode = webPrompt && ragPrompt ? 'PRIVATE_RAG_AND_WEB' : webPrompt ? 'WEB_GROUNDED' : ragPrompt ? 'PRIVATE_RAG' : 'MODEL_ONLY';
 
     // Pull the first chunk up front: routing errors + connection/model/config
     // failures surface here (before any bytes) with a proper status + safe message.
@@ -186,6 +218,7 @@ export async function POST(req: NextRequest) {
         'X-Biina-Model': meta.model,
         // Non-secret citation references for the client to render [n] sources.
         ...(citations.length ? { 'X-Biina-Citations': encodeURIComponent(JSON.stringify(citations)) } : {}),
+        'X-Biina-Answer-Mode': answerMode,
       },
     });
   } catch (err) {

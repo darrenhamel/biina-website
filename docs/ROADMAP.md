@@ -156,11 +156,43 @@ Legend: ☐ not started · ◐ in progress · ☑ done
   configures real embeddings + `pgvector`. Docs: `FILES.md`, `KNOWLEDGE_BASES.md`,
   `RAG_ARCHITECTURE.md`, `VECTOR_STORAGE.md`, `EMBEDDINGS.md`, `RAG_SECURITY.md`.
 
-## Phase 9 — Web search (RAG over the live web)  ☐  *(placeholder)*
+## Phase 9 — Web search & live grounding  ☑  *(build prompt — live-web track)*
 
-- ☐ Extend retrieval to a web-search/fetch tool behind the same trusted-context
-  discipline (untrusted-data framing, authorization before generation, no vendor
-  coupling). No provider/DB/frontend change to the chat contract.
+- ☑ Web pipeline (`server/web/`): user opt-in toggle → `WebSearchService` →
+  `WebSearchProvider` search → dedupe + **bounded** source selection
+  (`min(WEB_MAX_PAGES_FETCHED, plan.maxSourcesPerRequest)`) → SSRF-guarded
+  `WebPageFetcher` → `WebContentExtractor` → `WebGroundingContextBuilder` →
+  routing → provider → answer + citations. The **LLM never browses directly**;
+  bounded query/result/page budgets (no autonomous/recursive loops).
+- ☑ **SSRF protection** (`ssrf.ts`, not a configurable business setting):
+  http/https only; every resolved address must be public global-unicast; blocks
+  loopback/private/CGNAT/link-local + cloud metadata (`169.254.169.254`)/
+  unique-local/IPv4-mapped/internal hostnames; **re-validated on every redirect**;
+  re-resolved before connect (DNS-rebinding). Byte cap + time budgets +
+  content-type allowlist + identifiable UA, no credentials, never a proxy.
+- ☑ **Injection defense** (`WEB_SOURCE` = **untrusted data, not instructions**;
+  server policy authoritative — never follow in-page instructions / reveal
+  secrets / exfiltrate / take actions). **Public/private separation**: query to
+  the provider is the **user's question only** (never private text); public web
+  and private knowledge kept in separate labeled blocks, conflicts surfaced.
+- ☑ **Citations** unified across `PRIVATE_DOCUMENT`/`WEB_PAGE`/`SEARCH_SNIPPET`
+  (http/https public URLs only, "Retrieved on [date]", no fabrication) via
+  `X-Biina-Citations`; answer mode
+  (`MODEL_ONLY`/`PRIVATE_RAG`/`WEB_GROUNDED`/`PRIVATE_RAG_AND_WEB`) via
+  `X-Biina-Answer-Mode`; non-quota web failures degrade gracefully.
+- ☑ **Plan/quota**: `web_search_requests` audit (counts + latencies, no page
+  bodies; retention-minimizable query), per-tier web entitlements
+  (`webSearchEnabled`, daily/monthly web searches, `maxSourcesPerRequest`,
+  `freshnessFiltersEnabled`); failed searches don't count. Migration `0007`
+  (additive).
+- ☑ **Mock provider default** (deterministic, no key/network) runs+tests the whole
+  pipeline; real provider (Brave/Tavily/Bing) = a `GenericJsonSearchProvider`
+  adapter + env. Pipeline/SSRF/injection/quota/citation unit tests. Streaming
+  preserved (search+fetch, then AI stream; Stop cancels via `AbortSignal`).
+- **Deliverable:** live-web-grounded chat, portable + tested locally on the mock
+  provider; production configures a real search vendor via env. Docs:
+  `WEB_SEARCH.md`, `WEB_GROUNDING.md`, `WEB_SECURITY.md`, `CITATIONS.md`,
+  `SEARCH_PROVIDER.md`.
 
 ## Phase 10 — Pre-launch audit  ☐  *(build prompt 8)*
 
