@@ -396,6 +396,69 @@ export const startResearchSchema = z
   })
   .strict();
 
+// ---- Phase 16: personas / experience profiles + template library ----
+
+export const setExperienceSchema = z.object({ personaId: z.string().trim().min(1).max(32) }).strict();
+
+export const librarySearchSchema = z
+  .object({
+    q: z.string().trim().max(80).optional(),
+    itemType: z.enum(['PROMPT_TEMPLATE', 'AGENT_TEMPLATE', 'WORKFLOW_TEMPLATE', 'RESEARCH_TEMPLATE', 'KNOWLEDGE_TEMPLATE']).optional(),
+    persona: z.string().trim().max(32).optional(),
+    category: z.string().trim().max(64).optional(),
+    verifiedOnly: z.coerce.boolean().optional(),
+    readOnlyOnly: z.coerce.boolean().optional(),
+    freePlanOnly: z.coerce.boolean().optional(),
+    organizationApprovedOnly: z.coerce.boolean().optional(),
+    page: z.coerce.number().int().min(0).max(1000).optional(),
+    pageSize: z.coerce.number().int().min(1).max(50).optional(),
+  })
+  .strict();
+
+export const createLibraryItemSchema = z
+  .object({
+    itemType: z.enum(['PROMPT_TEMPLATE', 'AGENT_TEMPLATE', 'WORKFLOW_TEMPLATE', 'RESEARCH_TEMPLATE']),
+    title: z.string().trim().min(3).max(200),
+    titleAr: z.string().trim().max(200).optional(),
+    shortDescription: z.string().trim().max(400).optional(),
+    shortDescriptionAr: z.string().trim().max(400).optional(),
+    longDescription: z.string().trim().max(4000).optional(),
+    visibility: z.enum(['PRIVATE', 'ORGANIZATION']).default('PRIVATE'),
+    categories: z.array(z.string().trim().max(64)).max(8).optional(),
+    tags: z.array(z.string().trim().max(48)).max(12).optional(),
+    supportedPersonas: z.array(z.string().trim().max(32)).max(10).optional(),
+    // The typed definition is validated server-side by the LibraryReviewService.
+    definition: z.record(z.string(), z.unknown()),
+  })
+  .strict();
+
+export const createVersionSchema = z
+  .object({
+    definition: z.record(z.string(), z.unknown()),
+    changeNotes: z.string().trim().max(600).optional(),
+    supportedPersonas: z.array(z.string().trim().max(32)).max(10).optional(),
+    requiredPlans: z.array(z.string().trim().max(32)).max(6).optional(),
+  })
+  .strict();
+
+export const updateInstallSchema = z.object({ confirm: z.boolean().optional() }).strict();
+
+export const reviewDecisionSchema = z
+  .object({ action: z.enum(['APPROVE', 'REJECT', 'REQUEST_CHANGES', 'SUSPEND']), notes: z.string().trim().max(600).optional() })
+  .strict();
+
+export const orgLibrarySettingsSchema = z
+  .object({
+    publicLibraryEnabled: z.boolean().optional(),
+    installPolicy: z.enum(['OPEN', 'APPROVED_ONLY']).optional(),
+    writeCapableAllowed: z.boolean().optional(),
+  })
+  .strict();
+
+export const orgCurationSchema = z
+  .object({ libraryItemId: z.string().uuid(), state: z.enum(['RECOMMENDED', 'HIDDEN', 'APPROVED']).nullable(), pinnedVersionId: z.string().uuid().optional() })
+  .strict();
+
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ChatRequestInput = z.infer<typeof chatRequestSchema>;

@@ -428,6 +428,14 @@ export const plans = pgTable('plans', {
   maxSourcesPerResearch: integer('max_sources_per_research'),
   maxParallelAgents: integer('max_parallel_agents'),
   maxResearchCost: real('max_research_cost'),
+  // Phase 16 — personas, template library & controlled marketplace. null = unlimited.
+  libraryEnabled: boolean('library_enabled').notNull().default(false),
+  agentLibraryEnabled: boolean('agent_library_enabled').notNull().default(false),
+  workflowLibraryEnabled: boolean('workflow_library_enabled').notNull().default(false),
+  organizationLibraryEnabled: boolean('organization_library_enabled').notNull().default(false),
+  publicLibraryEnabled: boolean('public_library_enabled').notNull().default(false),
+  maxInstalledAgents: integer('max_installed_agents'),
+  maxInstalledWorkflows: integer('max_installed_workflows'),
   // Routing priority class (lower = higher priority). Readiness for priority routing.
   priorityClass: integer('priority_class').notNull().default(100),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -2003,3 +2011,251 @@ export type ResearchEvidence = typeof researchEvidence.$inferSelect;
 export type ResearchFinding = typeof researchFindings.$inferSelect;
 export type ResearchConflict = typeof researchConflicts.$inferSelect;
 export type ResearchResult = typeof researchResults.$inferSelect;
+
+// ==========================================================================
+// Phase 16 — personas / experience profiles + the controlled TEMPLATE LIBRARY
+// (agent / workflow / prompt / research marketplace FOUNDATION).
+//
+// A library item is DATA + validated configuration, never executable code. Nothing
+// here bypasses the platform: an install creates a controlled local definition under
+// the installer's OWN authority; it grants NO tool/connector permission by itself,
+// executable installs start in DRAFT, and every executable item passes deterministic
+// review before it can be published. Published versions are IMMUTABLE (a change is a
+// new version); a version that ADDS capability (e.g. a write tool) raises the risk
+// class and requires explicit re-review — an existing install is never silently
+// upgraded. PRIVATE/ORGANIZATION items are tenant-isolated. Experience profiles change
+// presentation/defaults/limits, never the security boundary.
+// ==========================================================================
+
+export const libraryItemType = pgEnum('library_item_type', ['PROMPT_TEMPLATE', 'AGENT_TEMPLATE', 'WORKFLOW_TEMPLATE', 'RESEARCH_TEMPLATE', 'KNOWLEDGE_TEMPLATE']);
+export const libraryVisibility = pgEnum('library_visibility', ['PRIVATE', 'ORGANIZATION', 'BIINA_CURATED', 'PUBLIC']);
+export const libraryItemStatus = pgEnum('library_item_status', ['DRAFT', 'SUBMITTED', 'IN_REVIEW', 'APPROVED', 'PUBLISHED', 'REJECTED', 'SUSPENDED', 'ARCHIVED', 'DEPRECATED']);
+export const libraryPublisherType = pgEnum('library_publisher_type', ['BIINA', 'ORGANIZATION', 'USER']);
+export const libraryRiskLevel = pgEnum('library_risk_level', ['CONTENT_ONLY', 'READ_ONLY', 'WRITE_CAPABLE', 'SCHEDULED_WRITE', 'HIGH_RISK']);
+export const libraryVersionStatus = pgEnum('library_version_status', ['DRAFT', 'PUBLISHED', 'SUPERSEDED']);
+export const libraryInstallationStatus = pgEnum('library_installation_status', ['DRAFT', 'ACTIVE', 'DISABLED', 'SUSPENDED', 'UNINSTALLED']);
+export const libraryReviewStatus = pgEnum('library_review_status', ['PENDING', 'APPROVED', 'REJECTED', 'CHANGES_REQUESTED', 'SUSPENDED']);
+export const libraryOrgItemState = pgEnum('library_org_item_state', ['RECOMMENDED', 'HIDDEN', 'APPROVED']);
+
+/** Discovery categories (persona-scoped). Content only — no authority. */
+export const libraryCategories = pgTable(
+  'library_categories',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: varchar('slug', { length: 64 }).notNull().unique(),
+    labelEn: varchar('label_en', { length: 120 }).notNull(),
+    labelAr: varchar('label_ar', { length: 120 }).notNull(),
+    // Personas this category is surfaced to (empty = all).
+    personaScopes: jsonb('persona_scopes').notNull().$type<string[]>().default([]),
+    sortOrder: integer('sort_order').notNull().default(100),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ enabledIdx: index('library_categories_enabled_idx').on(t.enabled) }),
+);
+
+/** A marketplace listing. Executable configuration lives in the (immutable) versions. */
+export const libraryItems = pgTable(
+  'library_items',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: varchar('slug', { length: 140 }).notNull().unique(),
+    itemType: libraryItemType('item_type').notNull(),
+    title: varchar('title', { length: 200 }).notNull(),
+    titleAr: varchar('title_ar', { length: 200 }),
+    shortDescription: varchar('short_description', { length: 400 }).notNull().default(''),
+    shortDescriptionAr: varchar('short_description_ar', { length: 400 }),
+    longDescription: text('long_description'),
+    longDescriptionAr: text('long_description_ar'),
+    // Publisher (tenant owner for non-BIINA items).
+    publisherType: libraryPublisherType('publisher_type').notNull(),
+    publisherUserId: uuid('publisher_user_id').references(() => users.id, { onDelete: 'set null' }),
+    publisherOrganizationId: uuid('publisher_organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+    visibility: libraryVisibility('visibility').notNull().default('PRIVATE'),
+    status: libraryItemStatus('status').notNull().default('DRAFT'),
+    // The current PUBLISHED version rendered/installed by default (nullable while DRAFT).
+    currentVersionId: uuid('current_version_id'),
+    categories: jsonb('categories').notNull().$type<string[]>().default([]),
+    tags: jsonb('tags').notNull().$type<string[]>().default([]),
+    // Compatibility metadata (mirrors the current version; used for discovery/filtering).
+    supportedPersonas: jsonb('supported_personas').notNull().$type<string[]>().default([]),
+    requiredPlans: jsonb('required_plans').notNull().$type<string[]>().default([]),
+    requiredCapabilities: jsonb('required_capabilities').notNull().$type<string[]>().default([]),
+    requiredConnectors: jsonb('required_connectors').notNull().$type<string[]>().default([]),
+    requiredTools: jsonb('required_tools').notNull().$type<string[]>().default([]),
+    riskLevel: libraryRiskLevel('risk_level').notNull().default('CONTENT_ONLY'),
+    featured: boolean('featured').notNull().default(false),
+    verified: boolean('verified').notNull().default(false),
+    // Aggregate quality signals (no per-customer identity, no private content).
+    installationCount: integer('installation_count').notNull().default(0),
+    successfulRuns: integer('successful_runs').notNull().default(0),
+    failedRuns: integer('failed_runs').notNull().default(0),
+    blockedActions: integer('blocked_actions').notNull().default(0),
+    ratingSum: integer('rating_sum').notNull().default(0),
+    ratingCount: integer('rating_count').notNull().default(0),
+    // Creator economics READINESS only — no payouts/purchasing in Phase 16.
+    creatorId: uuid('creator_id'),
+    monetizationStatus: varchar('monetization_status', { length: 24 }).notNull().default('FREE'),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+  },
+  (t) => ({
+    typeIdx: index('library_items_type_idx').on(t.itemType),
+    statusIdx: index('library_items_status_idx').on(t.status),
+    visibilityIdx: index('library_items_visibility_idx').on(t.visibility),
+    pubUserIdx: index('library_items_pub_user_idx').on(t.publisherUserId),
+    pubOrgIdx: index('library_items_pub_org_idx').on(t.publisherOrganizationId),
+    featuredIdx: index('library_items_featured_idx').on(t.featured),
+    publishedIdx: index('library_items_published_idx').on(t.publishedAt),
+  }),
+);
+
+/** An IMMUTABLE configuration snapshot per version. Never stores secrets/credentials. */
+export const libraryItemVersions = pgTable(
+  'library_item_versions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    libraryItemId: uuid('library_item_id').notNull().references(() => libraryItems.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    status: libraryVersionStatus('status').notNull().default('DRAFT'),
+    // The typed, validated definition (PromptTemplate/AgentTemplate/... ) — DATA, no code, no secrets.
+    configurationSnapshot: jsonb('configuration_snapshot').notNull().$type<Record<string, unknown>>(),
+    // A safe, validated manifest (requirements/tools/connectors/capabilities/risk/hash).
+    manifest: jsonb('manifest').notNull().$type<Record<string, unknown>>(),
+    changeNotes: varchar('change_notes', { length: 600 }),
+    riskLevel: libraryRiskLevel('risk_level').notNull().default('CONTENT_ONLY'),
+    requiredTools: jsonb('required_tools').notNull().$type<string[]>().default([]),
+    requiredConnectors: jsonb('required_connectors').notNull().$type<string[]>().default([]),
+    requiredCapabilities: jsonb('required_capabilities').notNull().$type<string[]>().default([]),
+    requiredPlans: jsonb('required_plans').notNull().$type<string[]>().default([]),
+    supportedPersonas: jsonb('supported_personas').notNull().$type<string[]>().default([]),
+    // Deterministic validation output captured at submit/publish time.
+    validationResult: jsonb('validation_result').$type<Record<string, unknown>>(),
+    // Stable hash of the published configuration — detects unauthorized modification.
+    configHash: varchar('config_hash', { length: 96 }).notNull(),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+  },
+  (t) => ({ itemVersionUnique: unique('library_item_versions_unique').on(t.libraryItemId, t.version) }),
+);
+
+/** A controlled local install of a specific version. Grants NO permission by itself. */
+export const libraryInstallations = pgTable(
+  'library_installations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    libraryItemId: uuid('library_item_id').notNull().references(() => libraryItems.id, { onDelete: 'cascade' }),
+    versionId: uuid('version_id').notNull().references(() => libraryItemVersions.id, { onDelete: 'cascade' }),
+    ownerType: workflowOwnerType('owner_type').notNull(),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+    // What was created locally: an AGENT/WORKFLOW definition (by id) or a PROMPT/RESEARCH
+    // config carried in localConfig. installedDefinitionId is under the installer's authority.
+    installedDefinitionType: varchar('installed_definition_type', { length: 16 }).notNull(),
+    installedDefinitionId: uuid('installed_definition_id'),
+    localConfig: jsonb('local_config').$type<Record<string, unknown>>(),
+    status: libraryInstallationStatus('status').notNull().default('DRAFT'),
+    // Org version pinning — do not auto-upgrade a pinned install.
+    pinnedVersion: boolean('pinned_version').notNull().default(false),
+    installedByUserId: uuid('installed_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    installedAt: timestamp('installed_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index('library_installations_user_idx').on(t.userId),
+    orgIdx: index('library_installations_org_idx').on(t.organizationId),
+    itemIdx: index('library_installations_item_idx').on(t.libraryItemId),
+  }),
+);
+
+/** The moderation record for a version. Deterministic validation + human decision. */
+export const libraryReviews = pgTable(
+  'library_reviews',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    libraryItemId: uuid('library_item_id').notNull().references(() => libraryItems.id, { onDelete: 'cascade' }),
+    versionId: uuid('version_id').references(() => libraryItemVersions.id, { onDelete: 'cascade' }),
+    status: libraryReviewStatus('status').notNull().default('PENDING'),
+    riskLevel: libraryRiskLevel('risk_level').notNull().default('CONTENT_ONLY'),
+    // Deterministic automated validation results (findings/flags) — never the only gate.
+    validationResult: jsonb('validation_result').$type<Record<string, unknown>>(),
+    reviewerUserId: uuid('reviewer_user_id').references(() => users.id, { onDelete: 'set null' }),
+    notes: text('notes'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    decidedAt: timestamp('decided_at', { withTimezone: true }),
+  },
+  (t) => ({ statusIdx: index('library_reviews_status_idx').on(t.status), itemIdx: index('library_reviews_item_idx').on(t.libraryItemId) }),
+);
+
+/** Optional ratings / helpfulness feedback (readiness). One per user per item. */
+export const libraryFeedback = pgTable(
+  'library_feedback',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    libraryItemId: uuid('library_item_id').notNull().references(() => libraryItems.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id'),
+    helpful: boolean('helpful'),
+    rating: integer('rating'), // 1..5, optional
+    comment: varchar('comment', { length: 1000 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ itemUserUnique: unique('library_feedback_item_user_unique').on(t.libraryItemId, t.userId) }),
+);
+
+/** Publisher identity (readiness for verified creators). No payouts in Phase 16. */
+export const publisherProfiles = pgTable(
+  'publisher_profiles',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+    displayName: varchar('display_name', { length: 160 }).notNull(),
+    publisherType: libraryPublisherType('publisher_type').notNull(),
+    verificationStatus: varchar('verification_status', { length: 16 }).notNull().default('UNVERIFIED'),
+    monetizationStatus: varchar('monetization_status', { length: 24 }).notNull().default('NONE'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ userIdx: index('publisher_profiles_user_idx').on(t.userId), orgIdx: index('publisher_profiles_org_idx').on(t.organizationId) }),
+);
+
+/** Per-organization library policy — curation without a new authorization system. */
+export const libraryOrgSettings = pgTable('library_org_settings', {
+  organizationId: uuid('organization_id').primaryKey().references(() => organizations.id, { onDelete: 'cascade' }),
+  // An org may disable the public marketplace for its members entirely.
+  publicLibraryEnabled: boolean('public_library_enabled').notNull().default(true),
+  // OPEN = members install any visible item; APPROVED_ONLY = only org-approved items.
+  installPolicy: varchar('install_policy', { length: 16 }).notNull().default('OPEN'),
+  // Whether members may install write-capable executable items.
+  writeCapableAllowed: boolean('write_capable_allowed').notNull().default(true),
+  updatedByUserId: uuid('updated_by_user_id'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Per-item org curation: recommend / hide / approve (+ optional version pin). */
+export const libraryOrgCuration = pgTable(
+  'library_org_curation',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+    libraryItemId: uuid('library_item_id').notNull().references(() => libraryItems.id, { onDelete: 'cascade' }),
+    state: libraryOrgItemState('state').notNull(),
+    pinnedVersionId: uuid('pinned_version_id'),
+    setByUserId: uuid('set_by_user_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ orgItemUnique: unique('library_org_curation_unique').on(t.organizationId, t.libraryItemId), orgIdx: index('library_org_curation_org_idx').on(t.organizationId) }),
+);
+
+export type LibraryCategory = typeof libraryCategories.$inferSelect;
+export type LibraryItem = typeof libraryItems.$inferSelect;
+export type LibraryItemVersion = typeof libraryItemVersions.$inferSelect;
+export type LibraryInstallation = typeof libraryInstallations.$inferSelect;
+export type LibraryReview = typeof libraryReviews.$inferSelect;
+export type LibraryFeedbackRow = typeof libraryFeedback.$inferSelect;
+export type PublisherProfile = typeof publisherProfiles.$inferSelect;
+export type LibraryOrgSettings = typeof libraryOrgSettings.$inferSelect;
+export type LibraryOrgCuration = typeof libraryOrgCuration.$inferSelect;

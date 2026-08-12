@@ -775,6 +775,70 @@ Details: [`ADVANCED_RESEARCH.md`](./ADVANCED_RESEARCH.md) ·
 [`RESEARCH_COSTS.md`](./RESEARCH_COSTS.md) ·
 [`ADVANCED_RESEARCH_ACTIVATION_CHECKLIST.md`](./ADVANCED_RESEARCH_ACTIVATION_CHECKLIST.md).
 
+## 4m. Experience Profiles & the CONTROLLED Template Library (Phase 16)
+
+Adds two things that make BIINA feel tailored without adding a new authority: **Experience
+Profiles** (personas) and a **controlled Template Library / marketplace foundation**. Two
+sentences carry the design: **a persona is a preference, not a permission** and **a
+library item is DATA + validated configuration, never executable code — installing it
+grants nothing.** Neither introduces a new runtime: profiles select defaults over the
+existing engines, and the library **reuses** the Phase 11 `AgentDefinition`, the Phase 12
+workflows, and the Phase 15 `ResearchOrchestrator`. Code: `apps/web/src/config/
+experience-profiles.ts`, `apps/web/src/server/experience/`, `apps/web/src/server/library/`.
+
+```
+User → Experience Profile → ContextEngine → Entitlements + Policy → Model Routing → BIINA capabilities
+```
+
+- **Experience Profiles.** Seven server-managed profiles
+  (default/kids/teens/campus/professional/business/government) over the persona records.
+  Each sets navigation, home starters, allowed/recommended capabilities, a **logical**
+  `defaultModelProfile` (`biina` / `biina-learn` / `biina-study` / `biina-business` /
+  `biina-gov` — never a vendor name; resolved by routing), and memory/web/connector/
+  agent/marketplace **posture** that reuses the Phase 9/10/11/12/13 controls. Selection is
+  a trusted server value (`profiles.personaId`), plan-gated (`resolveActiveExperience`,
+  `plan.allowedPersonas`); supervised youth are **not self-selectable**. A persona never
+  grants capability — entitlement, org policy, and safety stay authoritative.
+- **Library item model.** `library_items` → **immutable** `library_item_versions` →
+  `library_installations`, plus categories/reviews/feedback/publisher/org-settings/
+  org-curation (9 enums; migration [`0014_library.sql`](../apps/web/drizzle/0014_library.sql)).
+  Item types `PROMPT_TEMPLATE` / `AGENT_TEMPLATE` / `WORKFLOW_TEMPLATE` /
+  `RESEARCH_TEMPLATE` / `KNOWLEDGE_TEMPLATE` (knowledge = metadata-only readiness), each
+  with a strict typed Zod schema (declarative inputs only — no code/expressions). Risk is
+  **derived** from declared tools; **HIGH_RISK is not publishable** (`PUBLISHABLE_MAX_RISK
+  = SCHEDULED_WRITE`).
+- **Deterministic review, then a human.** `validateDefinition` (schema conformance,
+  registered-tools-only allowlist, arbitrary-code/URL block, injection/self-escalation/
+  exfiltration scan, tool-minimization/hidden-write, data-movement disclosure) is a hard
+  gate a human cannot override; **executables are never auto-published from AI review**.
+  Published versions are immutable (a change = a new version); a version that **adds
+  capability** raises risk and requires re-review — an install is never silently upgraded.
+- **Install grants nothing.** `installItem` creates a local `AgentDefinition` (declared
+  tools/connectors, no grant), a **DRAFT** workflow (no credentials/schedule/standing-auth),
+  or a prompt/research `localConfig`. Running still needs live connections + tool policy +
+  Phase 11 approvals (agents) or a configured trigger/connection/budget/standing-auth +
+  explicit activation (workflows). Visibility `PRIVATE` / `ORGANIZATION` / `BIINA_CURATED`
+  / `PUBLIC` (public off by default) is tenant-isolated; org curation (APPROVED_ONLY /
+  hide / recommend / write-capable restriction / version pin) refines without granting.
+- **Plan columns + kill switches.** Plan gained `library_enabled`, `agent_library_enabled`,
+  `workflow_library_enabled`, `organization_library_enabled`, `public_library_enabled`,
+  `max_installed_agents`, `max_installed_workflows`. Env switches (never widened by item
+  content or persona): `EXPERIENCE_PROFILES_ENABLED` (true), `LIBRARY_ENABLED` (true),
+  `LIBRARY_INSTALLATION_ENABLED` (true), `PUBLIC_LIBRARY_ENABLED` (false),
+  `PUBLIC_CREATOR_PUBLISHING_ENABLED` (false), `PAID_MARKETPLACE_ENABLED` (false, not
+  implemented), `LIBRARY_SUSPENDED_ITEMS`. Security events `library.*` + `experience.changed`
+  (metadata only).
+- **Readiness only.** No creator payouts / paid marketplace / public self-publishing;
+  knowledge templates are metadata-only; ratings/feedback + analytics are readiness; age
+  verification, guardian controls, per-specialist/per-persona model routing beyond the
+  default profile, and sovereign/government deployment are later phases.
+
+Details: [`PERSONAS.md`](./PERSONAS.md) · [`EXPERIENCE_PROFILES.md`](./EXPERIENCE_PROFILES.md) ·
+[`LIBRARY_ARCHITECTURE.md`](./LIBRARY_ARCHITECTURE.md) · [`AGENT_LIBRARY.md`](./AGENT_LIBRARY.md) ·
+[`WORKFLOW_LIBRARY.md`](./WORKFLOW_LIBRARY.md) · [`LIBRARY_PUBLISHING.md`](./LIBRARY_PUBLISHING.md) ·
+[`LIBRARY_SECURITY.md`](./LIBRARY_SECURITY.md) · [`KIDS_TEENS_EXPERIENCE.md`](./KIDS_TEENS_EXPERIENCE.md) ·
+[`ORGANIZATION_LIBRARY.md`](./ORGANIZATION_LIBRARY.md).
+
 ### System prompt (server-side, layered)
 
 Assembled entirely on the server (`apps/web/src/server/ai/system-prompt.ts`),

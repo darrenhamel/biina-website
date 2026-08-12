@@ -481,6 +481,42 @@ requires Phase 11 approval**. See
 [`docs/RESEARCH_COSTS.md`](./docs/RESEARCH_COSTS.md), and
 [`docs/ADVANCED_RESEARCH_ACTIVATION_CHECKLIST.md`](./docs/ADVANCED_RESEARCH_ACTIVATION_CHECKLIST.md).
 
+**Added (Phase 16):** **experience profiles (personas) & a controlled template library**
+— BIINA.ai now tailors itself to an audience (Default, Campus, Professional, Business,
+Government, and supervised Kids / Teens) with per-persona navigation, starters, and
+defaults, and offers a **curated library** of reusable prompts, agents, workflows, and
+research plans. Two rules shape everything. First, **a persona is a preference, not a
+permission**: it changes presentation and defaults only — your plan, your organization,
+and platform safety still decide what you can actually do, and picking *Government* or
+*Business* grants no data, no private model, and no compliance or sovereignty guarantee.
+Second, **a library item is data + validated configuration, never runnable code** — there
+is **no arbitrary code and no arbitrary network**, only tools from BIINA's registered
+allowlist. **Installing an item grants no permission**: an installed agent still needs you
+to connect the app, still obeys the tool policy, and still pauses every write for
+approval; an installed workflow arrives as a **draft with no credentials, schedule, or
+standing authorization** and does nothing until you configure and explicitly activate it.
+**Executable items are reviewed** — a deterministic validator (schema, registered-tools
+allowlist, arbitrary-code/URL block, prompt-injection and hidden-write detection) is a
+hard gate, and agents/workflows are **never auto-published from an AI judgement**; a human
+approves them. Published versions are **immutable**, and an update that adds a tool or
+raises risk is **never applied silently** — it requires explicit review, and existing
+permissions don't carry over. Items are **tenant-isolated** (private, organization,
+BIINA-curated, or — off by default — public); organizations can curate, require approval,
+forbid write-capable installs, disable the public marketplace, and pin versions. **Not yet
+built:** **no creator payouts, no paid marketplace, and no public self-publishing** (all
+off by default); knowledge templates are metadata-only; ratings and analytics are
+groundwork; and age verification, guardian controls, per-persona specialist model routing,
+and sovereign/government deployment are later phases. See
+[`docs/PERSONAS.md`](./docs/PERSONAS.md),
+[`docs/EXPERIENCE_PROFILES.md`](./docs/EXPERIENCE_PROFILES.md),
+[`docs/LIBRARY_ARCHITECTURE.md`](./docs/LIBRARY_ARCHITECTURE.md),
+[`docs/AGENT_LIBRARY.md`](./docs/AGENT_LIBRARY.md),
+[`docs/WORKFLOW_LIBRARY.md`](./docs/WORKFLOW_LIBRARY.md),
+[`docs/LIBRARY_PUBLISHING.md`](./docs/LIBRARY_PUBLISHING.md),
+[`docs/LIBRARY_SECURITY.md`](./docs/LIBRARY_SECURITY.md),
+[`docs/KIDS_TEENS_EXPERIENCE.md`](./docs/KIDS_TEENS_EXPERIENCE.md), and
+[`docs/ORGANIZATION_LIBRARY.md`](./docs/ORGANIZATION_LIBRARY.md).
+
 **Deferred:** **real external write actions** (the agent ships write-capable but on
 the mock adapter; real Gmail/Calendar/Slack writes require manual activation),
 **scheduled external writes** (off by default; need a standing authorization **and**

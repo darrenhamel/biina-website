@@ -86,6 +86,13 @@ const FALLBACK_FREE: Plan = {
   maxSourcesPerResearch: null,
   maxParallelAgents: null,
   maxResearchCost: null,
+  libraryEnabled: false,
+  agentLibraryEnabled: false,
+  workflowLibraryEnabled: false,
+  organizationLibraryEnabled: false,
+  publicLibraryEnabled: false,
+  maxInstalledAgents: null,
+  maxInstalledWorkflows: null,
   priorityClass: 100,
   updatedAt: new Date(0),
 };
@@ -141,6 +148,13 @@ export async function updatePlan(slug: string, patch: Record<string, unknown>, a
     'filesEligible',
     'toolsEligible',
     'webSearchEligible',
+    'libraryEnabled',
+    'agentLibraryEnabled',
+    'workflowLibraryEnabled',
+    'organizationLibraryEnabled',
+    'publicLibraryEnabled',
+    'maxInstalledAgents',
+    'maxInstalledWorkflows',
     'priorityClass',
   ] as const) {
     if (patch[key] !== undefined) set[key] = patch[key];

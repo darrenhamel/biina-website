@@ -79,29 +79,30 @@ export const personas: Record<PersonaId, PersonaConfig> = {
     id: 'campus',
     label: { en: 'Campus / Students', ar: 'الجامعة / الطلاب' },
     accent: 'persona-campus',
-    features: { ...baseFeatures },
-    enabled: false,
+    features: { ...baseFeatures, templates: true, files: true },
+    // Phase 16 — self-selectable adult study experience.
+    enabled: true,
   },
   professional: {
     id: 'professional',
     label: { en: 'Professionals', ar: 'المحترفون' },
     accent: 'persona-professional',
-    features: { ...baseFeatures },
-    enabled: false,
+    features: { ...baseFeatures, templates: true, agents: true, files: true },
+    enabled: true,
   },
   business: {
     id: 'business',
     label: { en: 'Business', ar: 'الأعمال' },
     accent: 'persona-business',
-    features: { ...baseFeatures },
-    enabled: false,
+    features: { ...baseFeatures, templates: true, agents: true, files: true },
+    enabled: true,
   },
   government: {
     id: 'government',
     label: { en: 'Government', ar: 'الحكومة' },
     accent: 'persona-government',
-    features: { ...baseFeatures },
-    enabled: false,
+    features: { ...baseFeatures, templates: true, files: true },
+    enabled: true,
   },
 };
 

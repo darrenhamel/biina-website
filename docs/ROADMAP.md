@@ -528,6 +528,81 @@ Legend: ☐ not started · ◐ in progress · ☑ done
   `RESEARCH_EVIDENCE.md`, `RESEARCH_CITATIONS.md`, `RESEARCH_SECURITY.md`,
   `RESEARCH_COSTS.md`, `ADVANCED_RESEARCH_ACTIVATION_CHECKLIST.md`.
 
+## Phase 16 — Experience Profiles & the CONTROLLED Template Library  ☑  *(build prompt — personas & marketplace track)*
+
+- ☑ **Experience Profiles over personas** (`config/experience-profiles.ts`): seven
+  server-managed profiles (default/kids/teens/campus/professional/business/government) —
+  navigation, home starters, allowed/recommended capabilities, a **logical**
+  `defaultModelProfile` (`biina` / `biina-learn` / `biina-study` / `biina-business` /
+  `biina-gov`, never a vendor name), and memory/web/connector/agent/marketplace posture
+  reusing the Phase 9/10/11/12/13 controls. **A persona is a preference, not a
+  permission.** Selection is a trusted server value (`profiles.personaId`), plan-gated
+  (`resolveActiveExperience` / `plan.allowedPersonas`); supervised youth (kids/teens) are
+  **not self-selectable**. `setUserExperience` validates enabled+selectable+plan; events
+  `experience.changed`.
+- ☑ **Library item model** (`server/library/`, schema Phase 16): `library_items` →
+  **immutable** `library_item_versions` → `library_installations`, plus
+  `library_categories`, `library_reviews`, `library_feedback`, `publisher_profiles`,
+  `library_org_settings`, `library_org_curation` (9 enums). Types PROMPT/AGENT/WORKFLOW/
+  RESEARCH/KNOWLEDGE (knowledge metadata-only readiness), each a strict typed Zod schema
+  with **declarative inputs only — no code/expressions**. Migration `0014_library.sql`.
+- ☑ **Deterministic LibraryReviewService** (`validation.ts`): schema conformance,
+  registered-tools-only allowlist (`isKnownTool` — no arbitrary HTTP/shell/API tool),
+  arbitrary-code/raw-URL BLOCK, prompt-injection/self-escalation/exfiltration scan,
+  tool-minimization/hidden-write, capability vocabulary, data-movement disclosure,
+  `classifyRisk`, `configHash`, `diffVersions`. **HIGH_RISK not publishable**
+  (`PUBLISHABLE_MAX_RISK = SCHEDULED_WRITE`). A human **cannot approve a
+  validation-failing version**; **executables never auto-published from AI review**.
+- ☑ **Install grants nothing** (`installations.ts`): creates a local `AgentDefinition`
+  (declared tools/connectors, **no** OAuth/scope grant), a **DRAFT** workflow (no
+  credentials/schedule/standing-auth), or a prompt/research `localConfig`. Running still
+  needs live connections + tool policy + Phase 11 approvals (agents) or a configured
+  trigger/connection/budget/standing-auth + explicit activation (workflows).
+  Pre-install `installDisclosure` (required/missing connectors, externalWrites,
+  dataMovement, startsAsDraft, blockers). Caps `min(plan, HARD_MAX=200)`.
+- ☑ **Versions, updates, forking** (`versions.ts`, `updates.ts`): published versions
+  immutable (a change = a new DRAFT version, re-validated/re-reviewed); a
+  **security-sensitive update** (new tool/connector/risk/approval) needs explicit
+  confirm — existing permissions don't carry to added capability, workflows drop to
+  DRAFT; version pinning; `forkItem` (PRIVATE copy, provenance, no upstream inheritance).
+- ☑ **Visibility, org curation, discovery** (`access.ts`, `org.ts`, `items.ts`,
+  `recommend.ts`, `catalog.ts`): PRIVATE/ORGANIZATION/BIINA_CURATED/PUBLIC (public off by
+  default), tenant-isolated; org policy (OPEN|APPROVED_ONLY, writeCapableAllowed, disable
+  public marketplace) + curation (RECOMMENDED/HIDDEN/APPROVED + pin); paginated search;
+  explainable, non-invasive recommendations (persona/plan/language — never private
+  conversation content); curated catalog (Study Assistant, Practice Questions, Meeting
+  Prep, Weekly Report, Research Assistant, Executive Brief, read-only Sales Analyst,
+  scheduled Weekly Sales Review — all CONTENT_ONLY/READ_ONLY).
+- ☑ **Publishing lifecycle + admin** (`review.ts`, `admin.ts`): DRAFT→SUBMITTED→
+  IN_REVIEW→APPROVED→PUBLISHED / REJECTED / SUSPENDED / DEPRECATED / ARCHIVED;
+  `submitForReview` (non-BIINA needs `PUBLIC_CREATOR_PUBLISHING_ENABLED`, off),
+  `reviewQueue`, `decideReview`, `suspendItem`, `deprecateItem`; `libraryOverview`
+  (metadata + kill-switch state only). Events `library.*` (metadata only).
+- ☑ **Schema + plan columns**: plan gained `library_enabled`, `agent_library_enabled`,
+  `workflow_library_enabled`, `organization_library_enabled`, `public_library_enabled`,
+  `max_installed_agents`, `max_installed_workflows`. Kill switches (env, never widened by
+  item content/persona): `EXPERIENCE_PROFILES_ENABLED` (true), `LIBRARY_ENABLED` (true),
+  `LIBRARY_INSTALLATION_ENABLED` (true), `PUBLIC_LIBRARY_ENABLED` (false),
+  `PUBLIC_CREATOR_PUBLISHING_ENABLED` (false), `PAID_MARKETPLACE_ENABLED` (false, not
+  implemented), `LIBRARY_SUSPENDED_ITEMS`. Hard caps `HARD_MAX_INSTALLED_AGENTS/
+  _WORKFLOWS = 200`.
+- ☑ **APIs**: `experience` (GET/POST); `library` (search/create), `library/discover`,
+  `library/categories`, `library/[id]` (+`/versions`, `/submit`, `/install`, `/fork`,
+  `/curation`), `library/installations` (+`[id]` get/patch/uninstall),
+  `library/org-settings`; `admin/library`, `admin/library/reviews` (+`[id]` decide),
+  `admin/library/[id]` (suspend/deprecate).
+- **Deliverable:** tailored personas + a **controlled** template library — **install
+  grants no permission**, **no arbitrary code / only registered tools**, executables
+  **reviewed deterministically then by a human** (never AI-auto-published), immutable
+  versions with re-review on capability escalation, tenant isolation, and youth
+  restrictions. Readiness only: **no creator payouts / paid marketplace / public
+  self-publishing**; knowledge templates metadata-only; ratings/feedback + analytics;
+  age verification, guardian controls, per-specialist/per-persona model routing beyond
+  the default profile, sovereign/government deployment. Docs: `PERSONAS.md`,
+  `EXPERIENCE_PROFILES.md`, `LIBRARY_ARCHITECTURE.md`, `AGENT_LIBRARY.md`,
+  `WORKFLOW_LIBRARY.md`, `LIBRARY_PUBLISHING.md`, `LIBRARY_SECURITY.md`,
+  `KIDS_TEENS_EXPERIENCE.md`, `ORGANIZATION_LIBRARY.md`.
+
 ## Phase 10 — Pre-launch audit  ☐  *(build prompt 8)*
 
 - ☐ Audit all 24 areas; run typecheck / lint / tests / prod build / migration validation / dep-security.

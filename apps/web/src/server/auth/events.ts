@@ -113,7 +113,30 @@ export type SecurityEventType =
   | 'research.completed'
   | 'research.canceled'
   | 'research.budget_exhausted'
-  | 'research.blocked';
+  | 'research.blocked'
+  // Phase 16 — personas / experience profiles + template library / marketplace.
+  | 'experience.changed'
+  | 'library.item_created'
+  | 'library.item_updated'
+  | 'library.version_created'
+  | 'library.submitted'
+  | 'library.review_started'
+  | 'library.approved'
+  | 'library.rejected'
+  | 'library.changes_requested'
+  | 'library.published'
+  | 'library.suspended'
+  | 'library.deprecated'
+  | 'library.installed'
+  | 'library.install_blocked'
+  | 'library.activated'
+  | 'library.updated_install'
+  | 'library.update_blocked'
+  | 'library.forked'
+  | 'library.uninstalled'
+  | 'library.org_curation_changed'
+  | 'library.org_policy_changed'
+  | 'library.validation_blocked';
 
 export async function logSecurityEvent(entry: {
   event: SecurityEventType;

@@ -427,11 +427,34 @@ async function seedPlans(db: DB) {
       .where(eq(plans.slug, slug));
   }
 
+  // Phase 16 — persona/library entitlements per tier. FREE gets a curated content
+  // subset (prompts/research), Pro+ get agent/workflow libraries, Business+ get org libraries.
+  const lib: Record<string, { on: boolean; agents: boolean; workflows: boolean; org: boolean; pub: boolean; maxAgents: number | null; maxWorkflows: number | null }> = {
+    FREE: { on: true, agents: false, workflows: false, org: false, pub: false, maxAgents: 0, maxWorkflows: 0 },
+    PRO: { on: true, agents: true, workflows: true, org: false, pub: false, maxAgents: 10, maxWorkflows: 10 },
+    BUSINESS: { on: true, agents: true, workflows: true, org: true, pub: false, maxAgents: 50, maxWorkflows: 50 },
+    ENTERPRISE: { on: true, agents: true, workflows: true, org: true, pub: false, maxAgents: null, maxWorkflows: null },
+    ADMIN: { on: true, agents: true, workflows: true, org: true, pub: false, maxAgents: null, maxWorkflows: null },
+  };
+  for (const [slug, l] of Object.entries(lib)) {
+    await db
+      .update(plans)
+      .set({ libraryEnabled: l.on, agentLibraryEnabled: l.agents, workflowLibraryEnabled: l.workflows, organizationLibraryEnabled: l.org, publicLibraryEnabled: l.pub, maxInstalledAgents: l.maxAgents, maxInstalledWorkflows: l.maxWorkflows })
+      .where(eq(plans.slug, slug));
+  }
+
   // Give the seeded admin the ADMIN plan (entitlement via plan, not a bypass).
   const adminEmail = process.env.SEED_ADMIN_EMAIL || 'admin@biina.local';
-  await db.update(users).set({ plan: 'ADMIN' }).where(eq(users.email, adminEmail));
+  const [admin] = await db.update(users).set({ plan: 'ADMIN' }).where(eq(users.email, adminEmail)).returning({ id: users.id });
 
-  console.log('✓ plans seeded (FREE/PRO/BUSINESS/ENTERPRISE/ADMIN) + RAG/web/connector/agent/workflow/memory/multimodal/research entitlements + voices');
+  // Phase 16 — seed the BIINA curated catalog + discovery categories (idempotent).
+  if (admin) {
+    const { seedLibrary } = await import('../src/server/library/catalog');
+    const res = await seedLibrary(admin.id);
+    console.log(`✓ library seeded (+${res.categories} categories, +${res.items} curated items)`);
+  }
+
+  console.log('✓ plans seeded (FREE/PRO/BUSINESS/ENTERPRISE/ADMIN) + RAG/web/connector/agent/workflow/memory/multimodal/research/library entitlements + voices');
 }
 
 /**
