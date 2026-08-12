@@ -33,6 +33,12 @@ const FALLBACK_FREE: Plan = {
   filesEligible: false,
   toolsEligible: false,
   webSearchEligible: false,
+  ragEnabled: false,
+  orgKnowledgeAccess: false,
+  maxFileSizeBytes: null,
+  maxFiles: null,
+  maxKnowledgeBases: null,
+  storageBytesLimit: null,
   priorityClass: 100,
   updatedAt: new Date(0),
 };

@@ -292,11 +292,30 @@ async function seedPlans(db: DB) {
   ];
   await db.insert(plans).values(rows).onConflictDoNothing({ target: plans.slug });
 
+  // Phase 8 — files/RAG entitlements per tier (configurable placeholders, not
+  // final commercial limits). Applied via update so both fresh and existing DBs
+  // get them without clobbering other admin-tuned fields. GB = 1024^3.
+  const GB = 1024 ** 3;
+  const MB = 1024 ** 2;
+  const rag: Record<string, { files: boolean; rag: boolean; org: boolean; size: number | null; count: number | null; kbs: number | null; storage: number | null }> = {
+    FREE: { files: true, rag: true, org: false, size: 5 * MB, count: 5, kbs: 1, storage: 25 * MB },
+    PRO: { files: true, rag: true, org: false, size: 25 * MB, count: 100, kbs: 10, storage: 2 * GB },
+    BUSINESS: { files: true, rag: true, org: true, size: 50 * MB, count: 1000, kbs: 50, storage: 20 * GB },
+    ENTERPRISE: { files: true, rag: true, org: true, size: null, count: null, kbs: null, storage: null },
+    ADMIN: { files: true, rag: true, org: true, size: null, count: null, kbs: null, storage: null },
+  };
+  for (const [slug, r] of Object.entries(rag)) {
+    await db
+      .update(plans)
+      .set({ filesEligible: r.files, ragEnabled: r.rag, orgKnowledgeAccess: r.org, maxFileSizeBytes: r.size, maxFiles: r.count, maxKnowledgeBases: r.kbs, storageBytesLimit: r.storage })
+      .where(eq(plans.slug, slug));
+  }
+
   // Give the seeded admin the ADMIN plan (entitlement via plan, not a bypass).
   const adminEmail = process.env.SEED_ADMIN_EMAIL || 'admin@biina.local';
   await db.update(users).set({ plan: 'ADMIN' }).where(eq(users.email, adminEmail));
 
-  console.log('✓ plans seeded (FREE/PRO/BUSINESS/ENTERPRISE/ADMIN)');
+  console.log('✓ plans seeded (FREE/PRO/BUSINESS/ENTERPRISE/ADMIN) + RAG entitlements');
 }
 
 /**

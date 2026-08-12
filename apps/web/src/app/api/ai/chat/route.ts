@@ -8,9 +8,15 @@ import {
   createConversation,
   getOwnedConversation,
   listMessages,
+  setConversationKnowledge,
 } from '@/server/conversations';
 import { startAssistantReply } from '@/server/ai/service';
 import type { RouteContext } from '@/server/ai/routing';
+import type { SystemPromptContext } from '@/server/ai/system-prompt';
+import { getPlan } from '@/server/ai/plans';
+import { retrieveKnowledge } from '@/server/rag/retrieval';
+import { buildRagContext, ragInstructions, type Citation, type RagMode } from '@/server/rag/context-builder';
+import { retrievalConfig } from '@/server/rag/config';
 import { isWorkload } from '@/config/ai-routing';
 import { chatRequestSchema } from '@/lib/validation';
 import { WORKSPACE_COOKIE } from '@/server/org/constants';
@@ -34,7 +40,7 @@ export async function POST(req: NextRequest) {
     const user = await getCurrentUser();
     if (!user) return unauthorized();
 
-    const { conversationId, message, model, workload } = chatRequestSchema.parse(await req.json());
+    const { conversationId, message, model, workload, knowledgeBaseIds, ragMode } = chatRequestSchema.parse(await req.json());
 
     // Resolve the active workspace from a cookie and VERIFY membership server-side
     // (never trust a browser-supplied org id). A suspended org blocks new AI usage.
@@ -66,6 +72,29 @@ export async function POST(req: NextRequest) {
     const history = await listMessages(finalConvId);
     const chatMessages: ChatMessage[] = history.map((m) => ({ role: m.role, content: m.content }));
 
+    // ---- RAG: retrieve grounded context (server-trusted scope + access) ----
+    // Knowledge is used ONLY when the user selects KBs, their plan permits RAG,
+    // and mode isn't 'off'. Access + tenant scope are re-verified in retrieval.
+    let ragPrompt: SystemPromptContext['rag'];
+    let citations: Citation[] = [];
+    const mode: RagMode = ragMode === 'strict' ? 'strict' : 'blended';
+    if (knowledgeBaseIds && knowledgeBaseIds.length > 0 && ragMode !== 'off') {
+      const plan = await getPlan(user.plan);
+      if (plan.ragEnabled) {
+        const { results } = await retrieveKnowledge({
+          query: message,
+          userId: user.id,
+          organizationId: orgId,
+          knowledgeBaseIds,
+          conversationId: finalConvId,
+        });
+        const built = buildRagContext(results, { maxContextTokens: retrievalConfig().maxContextTokens });
+        citations = built.citations;
+        ragPrompt = { instructions: ragInstructions(mode, built.hasEvidence), contextBlock: built.contextBlock };
+        await setConversationKnowledge(finalConvId, knowledgeBaseIds, mode).catch(() => {});
+      }
+    }
+
     // Build a validated routing context. Privileged fields (plan, isAdmin, org)
     // come from the authenticated session / verified membership, NOT the body.
     const routeContext: RouteContext = {
@@ -84,7 +113,7 @@ export async function POST(req: NextRequest) {
       routeContext,
       signal: req.signal,
       conversationId: finalConvId,
-      promptContext: { personaId: user.personaId, locale: user.locale },
+      promptContext: { personaId: user.personaId, locale: user.locale, rag: ragPrompt },
     });
 
     // Pull the first chunk up front: routing errors + connection/model/config
@@ -131,6 +160,7 @@ export async function POST(req: NextRequest) {
                 content: assistantText,
                 provider: meta.provider, // effective provider TYPE
                 model: meta.model, // effective BIINA model slug
+                citations: citations.length ? citations : undefined,
               });
             } catch (err) {
               logger.error('ai.chat.persist_error', { requestId, error: String(err) });
@@ -154,6 +184,8 @@ export async function POST(req: NextRequest) {
         // Consumer-safe: provider TYPE + BIINA logical model (never the infra model name).
         'X-Biina-Provider': meta.provider,
         'X-Biina-Model': meta.model,
+        // Non-secret citation references for the client to render [n] sources.
+        ...(citations.length ? { 'X-Biina-Citations': encodeURIComponent(JSON.stringify(citations)) } : {}),
       },
     });
   } catch (err) {

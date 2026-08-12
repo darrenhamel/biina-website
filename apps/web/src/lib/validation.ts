@@ -36,6 +36,9 @@ export const chatRequestSchema = z.object({
     .optional(),
   // Optional workload hint; validated against the allowed set in the router.
   workload: z.string().max(32).optional(),
+  // Phase 8 — optional knowledge-base selection for RAG (access re-verified server-side).
+  knowledgeBaseIds: z.array(z.string().uuid()).max(20).optional(),
+  ragMode: z.enum(['off', 'strict', 'blended']).optional(),
 });
 
 export const renameConversationSchema = z.object({

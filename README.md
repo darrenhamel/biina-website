@@ -267,5 +267,21 @@ See [`docs/BILLING_ARCHITECTURE.md`](./docs/BILLING_ARCHITECTURE.md),
 [`docs/BILLING_SECURITY.md`](./docs/BILLING_SECURITY.md), and
 [`docs/STRIPE_SETUP.md`](./docs/STRIPE_SETUP.md).
 
-**Deferred:** live payment activation, marketplace/payouts, and later phases.
-See [`docs/ROADMAP.md`](./docs/ROADMAP.md).
+**Added (Phase 8):** **files, knowledge bases & RAG** — documents-grounded chat.
+Server-side file validation + opaque storage (never executed), a knowledge-base
+model owned by a user or org (reusing Phase 6 roles), and retrieval that runs
+**before** generation with structural tenant isolation (in-query scope filter,
+Org A ≠ Org B) and prompt-injection defense (document text is untrusted data, the
+LLM never decides access). Portable defaults — a jsonb vector store (no `pgvector`)
+and a deterministic lexical dev embedder — run and test the pipeline anywhere;
+production configures real embeddings + `pgvector` behind the same interfaces. RAG
+is context infrastructure, gated by plan, and never bypasses Phase 4 routing or
+Phase 5 quotas. See [`docs/FILES.md`](./docs/FILES.md),
+[`docs/KNOWLEDGE_BASES.md`](./docs/KNOWLEDGE_BASES.md),
+[`docs/RAG_ARCHITECTURE.md`](./docs/RAG_ARCHITECTURE.md),
+[`docs/VECTOR_STORAGE.md`](./docs/VECTOR_STORAGE.md),
+[`docs/EMBEDDINGS.md`](./docs/EMBEDDINGS.md), and
+[`docs/RAG_SECURITY.md`](./docs/RAG_SECURITY.md).
+
+**Deferred:** live payment activation, marketplace/payouts, web search, and later
+phases. See [`docs/ROADMAP.md`](./docs/ROADMAP.md).

@@ -20,10 +20,14 @@ describe('persona architecture', () => {
 });
 
 describe('navigation architecture', () => {
-  it('has chat enabled and other areas scaffolded as disabled', () => {
-    const chat = primaryNav.find((n) => n.key === 'chat');
-    expect(chat?.enabled).toBe(true);
-    const disabled = primaryNav.filter((n) => n.key !== 'chat');
-    expect(disabled.every((n) => n.enabled === false)).toBe(true);
+  it('has the shipped areas enabled and future areas scaffolded as disabled', () => {
+    // Shipped, usable areas (chat since Phase 1; knowledge since Phase 8).
+    const shipped = new Set(['chat', 'knowledge']);
+    for (const key of shipped) {
+      expect(primaryNav.find((n) => n.key === key)?.enabled).toBe(true);
+    }
+    // Everything else is scaffolded (disabled) for a future phase.
+    const rest = primaryNav.filter((n) => !shipped.has(n.key));
+    expect(rest.every((n) => n.enabled === false)).toBe(true);
   });
 });

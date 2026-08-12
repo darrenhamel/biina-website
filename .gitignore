@@ -36,3 +36,7 @@ coverage/
 .DS_Store
 .vscode/
 *.local
+
+# Phase 8 — local file storage (never commit uploaded files)
+.data/
+apps/web/.data/

@@ -76,11 +76,12 @@ export async function addMessage(params: {
   content: string;
   provider?: string;
   model?: string;
+  citations?: unknown;
 }) {
   const db = getDb();
   const [row] = await db
     .insert(messages)
-    .values(params)
+    .values(params as never)
     .returning();
   // Bump conversation's updatedAt so it sorts to the top.
   await db
@@ -88,4 +89,12 @@ export async function addMessage(params: {
     .set({ updatedAt: new Date() })
     .where(eq(conversations.id, params.conversationId));
   return row;
+}
+
+/** Persist the RAG knowledge-base selection + mode on a conversation. */
+export async function setConversationKnowledge(conversationId: string, knowledgeBaseIds: string[], mode: string) {
+  await getDb()
+    .update(conversations)
+    .set({ ragKnowledgeBaseIds: knowledgeBaseIds, ragMode: mode, updatedAt: new Date() })
+    .where(eq(conversations.id, conversationId));
 }

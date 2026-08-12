@@ -11,6 +11,7 @@ import type { Dictionary } from '@/i18n/dictionaries';
 
 export type NavKey =
   | 'chat'
+  | 'knowledge'
   | 'discover'
   | 'search'
   | 'templates'
@@ -29,6 +30,7 @@ export interface NavItem {
 
 export const primaryNav: NavItem[] = [
   { key: 'chat', path: 'chat', labelKey: 'chat', icon: 'chat', enabled: true },
+  { key: 'knowledge', path: 'knowledge', labelKey: 'knowledge', icon: 'files', enabled: true },
   { key: 'discover', path: 'discover', labelKey: 'discover', icon: 'discover', enabled: false },
   { key: 'search', path: 'search', labelKey: 'search', icon: 'search', enabled: false },
   { key: 'templates', path: 'templates', labelKey: 'templates', icon: 'templates', enabled: false },

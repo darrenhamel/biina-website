@@ -306,6 +306,44 @@ Details: [`BILLING_ARCHITECTURE.md`](./BILLING_ARCHITECTURE.md) ·
 [`BILLING_SECURITY.md`](./BILLING_SECURITY.md) · [`STRIPE_SETUP.md`](./STRIPE_SETUP.md) ·
 [`PRODUCTION_BILLING_CHECKLIST.md`](./PRODUCTION_BILLING_CHECKLIST.md).
 
+## 4e. Files, knowledge & RAG (Phase 8)
+
+Grounds a chat in the user's own documents via retrieval-augmented generation —
+**context infrastructure, not a provider.** RAG never bypasses the Phase 4
+routing engine or the Phase 5 quotas; the AI provider owns neither storage nor
+knowledge.
+
+```
+Ingest:  Upload → FileStorage → DocumentProcessor → chunk → EmbeddingProvider → VectorStore → READY
+Chat:    /api/ai/chat → RAG retrieval (scope-verified) → context builder → routing → provider → citations
+```
+
+- **Files as opaque data.** Uploads are validated server-side (extension
+  whitelist + magic-byte sniff + parser check), stored **outside any public dir**
+  under server-generated opaque keys, and **never executed** (no macros/HTML/code;
+  malware-scan hook at the storage boundary). PDF/DOCX/TXT/MD/CSV supported;
+  scanned PDFs are flagged (OCR is an extension point).
+- **Knowledge bases** are owned by a user **XOR** an org and **reuse the Phase 6
+  org roles** — personal KB private to owner; org KB readable by members, editable
+  by managers. Joining/leaving an org never exposes or deletes personal files.
+- **Tenant isolation is structural.** `similaritySearch` filters by trusted scope
+  **in the query** (never a global search post-filtered) — Org A can never
+  retrieve Org B even at identical similarity.
+- **Injection defense.** Retrieved chunks are framed as **untrusted data, not
+  instructions**; the server-authoritative policy tells the model never to follow
+  in-document instructions. Authorization happens **before** generation — the LLM
+  never decides access. Citations reference documents (id/page/section), re-checked
+  on click; audit rows record references + scores, never content.
+- **Portable defaults, production path.** Ships a jsonb vector store (no
+  `pgvector` needed) + a deterministic **lexical** dev embedder so the pipeline
+  runs/tests anywhere; production configures Ollama/OpenAI-compatible embeddings +
+  (recommended) `pgvector`, behind the same interfaces. Gated by `plan.ragEnabled`
+  and per-plan file/KB/storage limits.
+
+Details: [`FILES.md`](./FILES.md) · [`KNOWLEDGE_BASES.md`](./KNOWLEDGE_BASES.md) ·
+[`RAG_ARCHITECTURE.md`](./RAG_ARCHITECTURE.md) · [`VECTOR_STORAGE.md`](./VECTOR_STORAGE.md) ·
+[`EMBEDDINGS.md`](./EMBEDDINGS.md) · [`RAG_SECURITY.md`](./RAG_SECURITY.md).
+
 ### System prompt (server-side, layered)
 
 Assembled entirely on the server (`apps/web/src/server/ai/system-prompt.ts`),

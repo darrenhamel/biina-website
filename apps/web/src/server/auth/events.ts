@@ -31,7 +31,13 @@ export type SecurityEventType =
   | 'org.member.removed'
   | 'org.member.role_changed'
   | 'org.member.left'
-  | 'org.settings.changed';
+  | 'org.settings.changed'
+  // Phase 8 — files / knowledge / RAG.
+  | 'kb.created'
+  | 'kb.deleted'
+  | 'file.uploaded'
+  | 'file.deleted'
+  | 'file.reprocessed';
 
 export async function logSecurityEvent(entry: {
   event: SecurityEventType;

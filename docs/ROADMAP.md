@@ -124,7 +124,45 @@ Legend: ☐ not started · ◐ in progress · ☑ done
   persistence, usage). ◐ Real RunPod endpoint pending user-supplied credentials.
 - **Deliverable:** cloud-inference-ready; local Ollama ↔ cloud vLLM is a config switch. No deploy.
 
-## Phase 9 — Pre-launch audit  ☐  *(build prompt 8)*
+## Phase 8 — Files, knowledge bases & RAG  ☑  *(build prompt — knowledge track)*
+
+- ☑ File pipeline (`server/rag/`): upload → server-side validation (ext whitelist
+  PDF/DOCX/TXT/MD/CSV + magic-byte sniff + parser check) → opaque storage **outside
+  any public dir** (random opaque keys, never executed; malware-scan hook) →
+  ingestion (`PROCESSING → extract → chunk → embed → vector upsert → READY`,
+  never-throws, idempotent reprocess). Scanned PDFs flagged (OCR = extension point).
+- ☑ Knowledge bases owned by a user **XOR** an org, **reusing Phase 6 org roles**
+  (personal = private; org = members read, managers edit). IDOR-safe
+  `resolveKbAccess` (404, no existence leak); joining/leaving an org never
+  exposes/deletes personal files.
+- ☑ Portable defaults so the pipeline runs/tests anywhere: **jsonb `PortableVectorStore`**
+  (no `pgvector`) + **deterministic lexical** dev embedder — with a documented
+  production path to `pgvector` + ANN and Ollama/OpenAI-compatible embeddings, behind
+  the same `VectorStore`/`EmbeddingProvider` interfaces (per-chunk model/dim for re-embed).
+- ☑ Retrieval inside the AI service, **before** generation: scope-verified
+  (`knowledgeBaseIds` + workspace), tenant isolation as an **in-query scope filter**
+  (Org A ≠ Org B at identical similarity), context builder (numbered SOURCE blocks,
+  dedupe, token budget), strict/blended + no-evidence grounding policy.
+- ☑ Prompt-injection defense (SOURCE = **untrusted data, not instructions**; system
+  policy authoritative; authorization before generation — LLM never decides access).
+  Citations (doc/page/section, re-checked on click) via `X-Biina-Citations`;
+  `rag_requests` audit (references + scores, no content); admin metadata-only views.
+- ☑ Migration `0006` (additive): `knowledge_bases`, `files`, `document_chunks`,
+  `rag_requests`; plan fields (`ragEnabled`, `orgKnowledgeAccess`, file/KB/storage
+  limits); `conversations.ragKnowledgeBaseIds`/`ragMode`, `messages.citations`.
+  Plan-gated (FREE small → ENTERPRISE/ADMIN unlimited). Chunking/embedding/vector/
+  isolation unit tests.
+- **Deliverable:** documents-grounded chat, portable + tested locally; production
+  configures real embeddings + `pgvector`. Docs: `FILES.md`, `KNOWLEDGE_BASES.md`,
+  `RAG_ARCHITECTURE.md`, `VECTOR_STORAGE.md`, `EMBEDDINGS.md`, `RAG_SECURITY.md`.
+
+## Phase 9 — Web search (RAG over the live web)  ☐  *(placeholder)*
+
+- ☐ Extend retrieval to a web-search/fetch tool behind the same trusted-context
+  discipline (untrusted-data framing, authorization before generation, no vendor
+  coupling). No provider/DB/frontend change to the chat contract.
+
+## Phase 10 — Pre-launch audit  ☐  *(build prompt 8)*
 
 - ☐ Audit all 24 areas; run typecheck / lint / tests / prod build / migration validation / dep-security.
 - ☐ Categorize findings (BLOCKER / HIGH / MEDIUM / LOW); fix BLOCKER + HIGH locally.

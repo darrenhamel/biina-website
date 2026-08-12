@@ -6,12 +6,24 @@ import type { Locale } from '@/i18n/config';
 import type { Dictionary } from '@/i18n/dictionaries';
 import { Icon } from '@/components/Icon';
 import { BrandMark } from '@/components/Logo';
+import { KnowledgeSelector, type RagMode } from './KnowledgeSelector';
+
+interface Citation {
+  n: number;
+  documentId: string;
+  documentName: string;
+  page?: number | null;
+  sectionTitle?: string | null;
+  chunkId?: string;
+  knowledgeBaseId?: string;
+}
 
 interface UiMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   streaming?: boolean;
+  citations?: Citation[];
 }
 
 let tempCounter = 0;
@@ -40,6 +52,9 @@ export function ChatWorkspace({
   // User-facing model selector (BIINA names only; infra hidden).
   const [models, setModels] = useState<Array<{ slug: string; displayName: string }>>([]);
   const [model, setModel] = useState<string>('');
+  // Knowledge (RAG) selection for grounding answers.
+  const [knowledgeBaseIds, setKnowledgeBaseIds] = useState<string[]>([]);
+  const [ragMode, setRagMode] = useState<RagMode>('off');
 
   // Keep state in sync when navigating between conversations.
   useEffect(() => {
@@ -81,12 +96,19 @@ export function ChatWorkspace({
     const controller = new AbortController();
     abortRef.current = controller;
     const hadConversation = Boolean(convIdRef.current);
+    const useRag = knowledgeBaseIds.length > 0 && ragMode !== 'off';
+    let citations: Citation[] | undefined;
 
     try {
       const res = await fetch('/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ conversationId: convIdRef.current, message: content, model: model || undefined }),
+        body: JSON.stringify({
+          conversationId: convIdRef.current,
+          message: content,
+          model: model || undefined,
+          ...(useRag ? { knowledgeBaseIds, ragMode } : {}),
+        }),
         signal: controller.signal,
       });
 
@@ -97,6 +119,15 @@ export function ChatWorkspace({
 
       const newConvId = res.headers.get('X-Biina-Conversation-Id') ?? undefined;
       if (newConvId) convIdRef.current = newConvId;
+
+      const citHeader = res.headers.get('X-Biina-Citations');
+      if (citHeader) {
+        try {
+          citations = JSON.parse(decodeURIComponent(citHeader)) as Citation[];
+        } catch {
+          citations = undefined;
+        }
+      }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -116,7 +147,13 @@ export function ChatWorkspace({
     } finally {
       setBusy(false);
       abortRef.current = null;
-      setMessages((prev) => prev.map((m) => (m.id === assistantMsg.id ? { ...m, streaming: false } : m)));
+      setMessages((prev) =>
+        prev.map((m) =>
+          m.id === assistantMsg.id
+            ? { ...m, streaming: false, citations: citations ?? m.citations }
+            : m,
+        ),
+      );
 
       // For a brand-new conversation, reflect the id in the URL + refresh the sidebar.
       if (!hadConversation && convIdRef.current) {
@@ -177,6 +214,10 @@ export function ChatWorkspace({
         models={models}
         model={model}
         setModel={setModel}
+        knowledgeBaseIds={knowledgeBaseIds}
+        setKnowledgeBaseIds={setKnowledgeBaseIds}
+        ragMode={ragMode}
+        setRagMode={setRagMode}
       />
     </div>
   );
@@ -236,6 +277,9 @@ function MessageRow({ message, dict }: { message: UiMessage; dict: Dictionary })
               <span className="ms-0.5 inline-block h-4 w-1.5 animate-blink bg-accent align-middle" />
             ) : null}
           </div>
+          {!isUser && message.citations && message.citations.length > 0 && (
+            <Citations citations={message.citations} dict={dict} />
+          )}
           {!isUser && !message.streaming && message.content.length > 0 && (
             <MessageActions content={message.content} dict={dict} />
           )}
@@ -270,6 +314,27 @@ function MessageActions({ content, dict }: { content: string; dict: Dictionary }
   );
 }
 
+function Citations({ citations, dict }: { citations: Citation[]; dict: Dictionary }) {
+  return (
+    <div className="mt-3 rounded-xl border border-line bg-paper-sunken px-3 py-2">
+      <p className="text-xs font-semibold text-ink-soft">{dict.rag.sources}</p>
+      <ul className="mt-1 space-y-0.5">
+        {citations.map((c) => (
+          <li key={`${c.n}-${c.chunkId ?? c.documentId}`} className="text-xs text-ink-soft">
+            <span className="font-semibold text-ink">[{c.n}]</span> {c.documentName}
+            {c.page != null && (
+              <span className="text-ink-faint">
+                {' '}
+                — {dict.rag.page} {c.page}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function Composer({
   dict,
   input,
@@ -282,6 +347,10 @@ function Composer({
   models,
   model,
   setModel,
+  knowledgeBaseIds,
+  setKnowledgeBaseIds,
+  ragMode,
+  setRagMode,
 }: {
   dict: Dictionary;
   input: string;
@@ -294,6 +363,10 @@ function Composer({
   models: Array<{ slug: string; displayName: string }>;
   model: string;
   setModel: (v: string) => void;
+  knowledgeBaseIds: string[];
+  setKnowledgeBaseIds: (ids: string[]) => void;
+  ragMode: RagMode;
+  setRagMode: (mode: RagMode) => void;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
 
@@ -342,6 +415,15 @@ function Composer({
             </button>
           </div>
         )}
+        <div className="mb-2 flex items-center">
+          <KnowledgeSelector
+            dict={dict}
+            selected={knowledgeBaseIds}
+            onSelectedChange={setKnowledgeBaseIds}
+            mode={ragMode}
+            onModeChange={setRagMode}
+          />
+        </div>
         <div className="flex items-end gap-2 rounded-2xl border border-line-strong bg-paper-raised p-2 focus-within:border-accent">
           <textarea
             ref={ref}

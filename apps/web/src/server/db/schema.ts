@@ -9,6 +9,7 @@ import {
   jsonb,
   boolean,
   integer,
+  bigint,
   real,
   unique,
 } from 'drizzle-orm/pg-core';
@@ -106,6 +107,9 @@ export const conversations = pgTable(
     title: varchar('title', { length: 200 }).notNull().default('New conversation'),
     // The logical model id last used (from the gateway registry). Not a vendor name.
     model: varchar('model', { length: 64 }),
+    // Phase 8 — selected knowledge bases (verified server-side each request) + RAG mode.
+    ragKnowledgeBaseIds: jsonb('rag_knowledge_base_ids').$type<string[]>(),
+    ragMode: varchar('rag_mode', { length: 16 }), // 'off' | 'strict' | 'blended'
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -128,6 +132,10 @@ export const messages = pgTable(
     // Provider/model that produced an assistant message (for transparency + Phase 4 metering).
     provider: varchar('provider', { length: 48 }),
     model: varchar('model', { length: 64 }),
+    // Phase 8 — citation metadata for a RAG answer (source references, NOT content).
+    citations: jsonb('citations').$type<
+      Array<{ n: number; documentId: string; documentName: string; page?: number | null; sectionTitle?: string | null; chunkId: string; knowledgeBaseId: string }>
+    >(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -351,6 +359,13 @@ export const plans = pgTable('plans', {
   filesEligible: boolean('files_eligible').notNull().default(false),
   toolsEligible: boolean('tools_eligible').notNull().default(false),
   webSearchEligible: boolean('web_search_eligible').notNull().default(false),
+  // Phase 8 — files / knowledge / RAG entitlements. null = unlimited for a limit.
+  ragEnabled: boolean('rag_enabled').notNull().default(false),
+  orgKnowledgeAccess: boolean('org_knowledge_access').notNull().default(false),
+  maxFileSizeBytes: integer('max_file_size_bytes'),
+  maxFiles: integer('max_files'),
+  maxKnowledgeBases: integer('max_knowledge_bases'),
+  storageBytesLimit: bigint('storage_bytes_limit', { mode: 'number' }),
   // Routing priority class (lower = higher priority). Readiness for priority routing.
   priorityClass: integer('priority_class').notNull().default(100),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -762,6 +777,141 @@ export type BillingInvoice = typeof billingInvoices.$inferSelect;
 export type BillingWebhookEvent = typeof billingWebhookEvents.$inferSelect;
 export type BillingConfig = typeof billingConfig.$inferSelect;
 export type SubscriptionStatus = (typeof subscriptionStatus.enumValues)[number];
+
+// ==========================================================================
+// Phase 8 — files, knowledge bases, document chunks & RAG.
+//
+// TENANT ISOLATION: every file / knowledge base / chunk carries its trusted
+// owner scope (ownerUserId XOR organizationId). Retrieval ALWAYS filters by that
+// scope in SQL — never a global search filtered afterward. Chunks store which
+// embedding model produced their vector so a future re-embed is possible.
+// ==========================================================================
+
+export const fileStatus = pgEnum('file_status', ['UPLOADED', 'QUEUED', 'PROCESSING', 'READY', 'FAILED', 'DELETED', 'UNSUPPORTED']);
+export const kbStatus = pgEnum('kb_status', ['ACTIVE', 'ARCHIVED']);
+export const chunkEmbedStatus = pgEnum('chunk_embed_status', ['PENDING', 'EMBEDDED', 'FAILED']);
+
+/** A knowledge base groups documents. Owned by a user XOR an organization. */
+export const knowledgeBases = pgTable(
+  'knowledge_bases',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    name: varchar('name', { length: 160 }).notNull(),
+    description: varchar('description', { length: 500 }),
+    ownerUserId: uuid('owner_user_id').references(() => users.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    status: kbStatus('status').notNull().default('ACTIVE'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    ownerIdx: index('kb_owner_idx').on(t.ownerUserId),
+    orgIdx: index('kb_org_idx').on(t.organizationId),
+  }),
+);
+
+/** An uploaded document. Belongs to one knowledge base (MVP). No public paths. */
+export const files = pgTable(
+  'files',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    // Trusted owner scope — exactly one of these is set.
+    ownerUserId: uuid('owner_user_id').references(() => users.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+    uploadedByUserId: uuid('uploaded_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    knowledgeBaseId: uuid('knowledge_base_id').references(() => knowledgeBases.id, { onDelete: 'cascade' }),
+    originalFilename: varchar('original_filename', { length: 400 }).notNull(),
+    displayName: varchar('display_name', { length: 400 }).notNull(),
+    mimeType: varchar('mime_type', { length: 160 }).notNull(),
+    extension: varchar('extension', { length: 16 }).notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    storageProvider: varchar('storage_provider', { length: 32 }).notNull(),
+    // Server-controlled internal key — NEVER a user filename, never exposed to users.
+    storageKey: varchar('storage_key', { length: 400 }).notNull(),
+    status: fileStatus('status').notNull().default('UPLOADED'),
+    failureReason: varchar('failure_reason', { length: 500 }),
+    pageCount: integer('page_count'),
+    chunkCount: integer('chunk_count'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }),
+  },
+  (t) => ({
+    ownerIdx: index('files_owner_idx').on(t.ownerUserId),
+    orgIdx: index('files_org_idx').on(t.organizationId),
+    kbIdx: index('files_kb_idx').on(t.knowledgeBaseId),
+    statusIdx: index('files_status_idx').on(t.status),
+    createdIdx: index('files_created_idx').on(t.createdAt),
+  }),
+);
+
+/**
+ * A retrievable chunk of a document. `embedding` is stored PORTABLY as a JSON
+ * float array (works without pgvector); a pgvector deployment adds a `vector`
+ * column + ANN index (see docs/VECTOR_STORAGE.md). `embeddingModel`/`embeddingDim`
+ * record which model produced the vector, so a re-embed can detect mismatches.
+ */
+export const documentChunks = pgTable(
+  'document_chunks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    documentId: uuid('document_id')
+      .notNull()
+      .references(() => files.id, { onDelete: 'cascade' }),
+    knowledgeBaseId: uuid('knowledge_base_id')
+      .notNull()
+      .references(() => knowledgeBases.id, { onDelete: 'cascade' }),
+    // Denormalized trusted scope so retrieval filters isolation IN the query.
+    organizationId: uuid('organization_id'),
+    ownerUserId: uuid('owner_user_id'),
+    chunkIndex: integer('chunk_index').notNull(),
+    content: text('content').notNull(),
+    pageNumber: integer('page_number'),
+    sectionTitle: varchar('section_title', { length: 300 }),
+    tokenCount: integer('token_count'),
+    embeddingStatus: chunkEmbedStatus('embedding_status').notNull().default('PENDING'),
+    embeddingModel: varchar('embedding_model', { length: 120 }),
+    embeddingDim: integer('embedding_dim'),
+    embedding: jsonb('embedding').$type<number[]>(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    docIdx: index('chunks_document_idx').on(t.documentId),
+    kbIdx: index('chunks_kb_idx').on(t.knowledgeBaseId),
+    orgIdx: index('chunks_org_idx').on(t.organizationId),
+    ownerIdx: index('chunks_owner_idx').on(t.ownerUserId),
+    embedStatusIdx: index('chunks_embed_status_idx').on(t.embeddingStatus),
+  }),
+);
+
+/** Retrieval audit/debug record — references + scores, never duplicated content. */
+export const ragRequests = pgTable(
+  'rag_requests',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    requestId: uuid('request_id'),
+    userId: uuid('user_id'),
+    organizationId: uuid('organization_id'),
+    conversationId: uuid('conversation_id'),
+    knowledgeBaseIds: jsonb('knowledge_base_ids').$type<string[]>(),
+    retrievedChunkIds: jsonb('retrieved_chunk_ids').$type<string[]>(),
+    scores: jsonb('scores').$type<number[]>(),
+    resultCount: integer('result_count'),
+    retrievalMs: integer('retrieval_ms'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index('rag_requests_user_idx').on(t.userId),
+    createdIdx: index('rag_requests_created_idx').on(t.createdAt),
+  }),
+);
+
+export type KnowledgeBase = typeof knowledgeBases.$inferSelect;
+export type FileRecord = typeof files.$inferSelect;
+export type DocumentChunk = typeof documentChunks.$inferSelect;
+export type NewDocumentChunk = typeof documentChunks.$inferInsert;
+export type RagRequest = typeof ragRequests.$inferSelect;
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
