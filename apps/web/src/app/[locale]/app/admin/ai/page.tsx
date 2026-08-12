@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { isLocale, type Locale } from '@/i18n/config';
 import { getDictionary } from '@/i18n/dictionaries';
 import { getCurrentUser } from '@/server/auth/session';
+import { isPlatformAdmin } from '@/server/auth/permissions';
 import { Icon } from '@/components/Icon';
 import { AiControlPanel } from '@/components/app/AiControlPanel';
 
@@ -14,7 +15,7 @@ export default async function AiControlPage({ params }: { params: { locale: stri
 
   const user = await getCurrentUser();
   if (!user) redirect(`/${locale}/login`);
-  if (user.role !== 'ADMIN') {
+  if (!isPlatformAdmin(user.role)) {
     return (
       <div className="grid h-full place-items-center px-6 text-center">
         <div className="max-w-sm">

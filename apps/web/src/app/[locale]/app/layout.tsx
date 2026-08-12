@@ -1,8 +1,10 @@
+import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { isLocale, type Locale } from '@/i18n/config';
 import { getDictionary } from '@/i18n/dictionaries';
 import { getCurrentUser } from '@/server/auth/session';
 import { listConversations } from '@/server/conversations';
+import { listUserOrgs } from '@/server/org/organizations';
 import { AppShell } from '@/components/app/AppShell';
 
 export const dynamic = 'force-dynamic';
@@ -21,7 +23,8 @@ export default async function AppLayout({
   const user = await getCurrentUser();
   if (!user) redirect(`/${locale}/login`);
 
-  const conversations = await listConversations(user.id);
+  const [conversations, orgs] = await Promise.all([listConversations(user.id), listUserOrgs(user.id)]);
+  const activeWorkspace = cookies().get('biina_workspace')?.value ?? 'personal';
 
   return (
     <AppShell
@@ -29,6 +32,8 @@ export default async function AppLayout({
       dict={dict}
       user={{ displayName: user.displayName, email: user.email, role: user.role }}
       conversations={conversations.map((c) => ({ id: c.id, title: c.title }))}
+      organizations={orgs.map((o) => ({ slug: o.slug, displayName: o.displayName }))}
+      activeWorkspace={activeWorkspace}
     >
       {children}
     </AppShell>

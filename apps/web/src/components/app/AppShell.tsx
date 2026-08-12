@@ -13,11 +13,16 @@ import { Icon } from '@/components/Icon';
 export interface ShellUser {
   displayName: string;
   email: string;
-  role: 'USER' | 'ADMIN';
+  role: 'USER' | 'ADMIN' | 'SUPER_ADMIN';
 }
 export interface ConversationLite {
   id: string;
   title: string;
+}
+
+export interface WorkspaceLite {
+  slug: string;
+  displayName: string;
 }
 
 export function AppShell({
@@ -25,12 +30,16 @@ export function AppShell({
   dict,
   user,
   conversations,
+  organizations = [],
+  activeWorkspace = 'personal',
   children,
 }: {
   locale: Locale;
   dict: Dictionary;
   user: ShellUser;
   conversations: ConversationLite[];
+  organizations?: WorkspaceLite[];
+  activeWorkspace?: string;
   children: React.ReactNode;
 }) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -71,6 +80,12 @@ export function AppShell({
             <Logo />
           </div>
           <div className="ms-auto flex items-center gap-1.5">
+            <WorkspaceSwitcher
+              locale={locale}
+              dict={dict}
+              organizations={organizations}
+              activeWorkspace={activeWorkspace}
+            />
             <LocaleSwitcher locale={locale} />
             <AccountMenu locale={locale} dict={dict} user={user} />
           </div>
@@ -256,9 +271,11 @@ function AccountMenu({
               <p className="truncate text-xs text-ink-faint">{user.email}</p>
             </div>
             <MenuLink href={`/${locale}/app/account`} icon="user" label={dict.nav.account} onClick={() => setOpen(false)} />
+            <MenuLink href={`/${locale}/app/organizations`} icon="user" label={dict.nav.organizations} onClick={() => setOpen(false)} />
+            <MenuLink href={`/${locale}/app/security`} icon="shield" label={dict.nav.security} onClick={() => setOpen(false)} />
             <MenuLink href={`/${locale}/app/usage`} icon="spark" label={dict.nav.usage} onClick={() => setOpen(false)} />
             <MenuLink href={`/${locale}/app/settings`} icon="settings" label={dict.nav.settings} onClick={() => setOpen(false)} />
-            {user.role === 'ADMIN' && (
+            {(user.role === 'ADMIN' || user.role === 'SUPER_ADMIN') && (
               <MenuLink href={`/${locale}/app/admin`} icon="shield" label={dict.nav.admin} onClick={() => setOpen(false)} />
             )}
             <button
@@ -270,6 +287,94 @@ function AccountMenu({
               <Icon name="logout" width={16} height={16} />
               {dict.common.signOut}
             </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function WorkspaceSwitcher({
+  locale,
+  dict,
+  organizations,
+  activeWorkspace,
+}: {
+  locale: Locale;
+  dict: Dictionary;
+  organizations: WorkspaceLite[];
+  activeWorkspace: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const router = useRouter();
+
+  if (organizations.length === 0) return null;
+
+  const active = organizations.find((o) => o.slug === activeWorkspace);
+  const activeLabel = active ? active.displayName : dict.org.personal;
+
+  async function select(workspace: string) {
+    setOpen(false);
+    if (workspace === activeWorkspace) return;
+    setBusy(true);
+    try {
+      await fetch('/api/workspace', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ workspace }),
+      });
+      router.refresh();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const options: WorkspaceLite[] = [{ slug: 'personal', displayName: dict.org.personal }, ...organizations];
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="btn-ghost max-w-[10rem] gap-2 px-2.5 py-1.5 text-sm"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={dict.org.switchWorkspace}
+        disabled={busy}
+      >
+        <Icon name="user" width={16} height={16} />
+        <span className="truncate">{activeLabel}</span>
+      </button>
+      {open && (
+        <>
+          <button className="fixed inset-0 z-10" aria-hidden onClick={() => setOpen(false)} />
+          <div
+            role="menu"
+            className="absolute end-0 z-20 mt-1 w-56 overflow-hidden rounded-xl border border-line bg-paper-raised py-1 shadow-lg"
+          >
+            <p className="px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-ink-faint">
+              {dict.org.workspace}
+            </p>
+            {options.map((o) => {
+              const isActive = o.slug === activeWorkspace;
+              return (
+                <button
+                  key={o.slug}
+                  type="button"
+                  role="menuitem"
+                  onClick={() => select(o.slug)}
+                  className={`flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-paper-sunken ${
+                    isActive ? 'font-semibold text-accent' : 'text-ink'
+                  }`}
+                >
+                  <span
+                    className={`h-1.5 w-1.5 shrink-0 rounded-full ${isActive ? 'bg-accent' : 'bg-transparent'}`}
+                  />
+                  <span className="truncate">{o.displayName}</span>
+                </button>
+              );
+            })}
           </div>
         </>
       )}

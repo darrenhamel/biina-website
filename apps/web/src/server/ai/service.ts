@@ -342,6 +342,7 @@ async function writeLedgerEvent(args: {
   await writeUsageEvent({
     requestId: args.requestId,
     userId: args.params.routeContext.userId ?? null,
+    organizationId: args.params.routeContext.organizationId ?? null,
     conversationId: args.params.conversationId ?? null,
     biinaModelSlug: meta.model || null,
     providerType: meta.provider || null,

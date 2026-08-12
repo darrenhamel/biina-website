@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/server/auth/session';
+import { isPlatformAdmin } from '@/server/auth/permissions';
 import { loadAiConfig } from '@/server/ai/catalog';
 import { unauthorized, handleError } from '@/lib/api';
 
@@ -16,7 +17,7 @@ export async function GET() {
   try {
     const user = await getCurrentUser();
     if (!user) return unauthorized();
-    const isAdmin = user.role === 'ADMIN';
+    const isAdmin = isPlatformAdmin(user.role);
 
     const snap = await loadAiConfig();
     const models = snap.models

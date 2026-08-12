@@ -247,6 +247,33 @@ Details: [`USAGE_METERING.md`](./USAGE_METERING.md) ·
 [`PLANS_AND_ENTITLEMENTS.md`](./PLANS_AND_ENTITLEMENTS.md) ·
 [`COST_CONTROLS.md`](./COST_CONTROLS.md).
 
+## 4c. Identity, authorization & organizations (Phase 6)
+
+Multi-tenant identity on top of the existing server-authoritative sessions —
+hardened, not rewritten.
+
+- **Two distinct authorities.** PLATFORM roles (`USER`/`ADMIN`/`SUPER_ADMIN`) and
+  ORG roles (`OWNER`/`ADMIN`/`MEMBER`) never conflate. All role logic lives in one
+  pure module (`server/auth/permissions.ts`); routes call guards, never inline
+  `role === …`.
+- **Hardened auth.** Rate-limited flows, a security-event log, single-use hashed
+  verify/reset tokens, change-password (revokes other sessions), no account
+  enumeration, session listing + revocation, and account status
+  (`ACTIVE`/`SUSPENDED`/`DISABLED`) enforced in `getCurrentUser`.
+- **Organizations.** `resolveOrgContext` verifies membership server-side (IDOR-safe
+  — a browser org id is never trusted). Owner-count invariant, atomic single-use
+  invitations, a workspace cookie that is only a re-verified hint. Conversations
+  and usage are attributed to the active workspace. Org plans/routing have schema
+  seams but are not activated (payments = Phase 7).
+- **Provider-independent email** (`server/email`): identity depends on an
+  interface, not a vendor. Dev provider ships; SMTP/Resend/SES drop in later.
+- **CSRF** same-origin gate on mutating API calls (middleware) + `SameSite=lax`
+  cookies; production **HSTS** + security headers.
+
+Details: [`AUTHENTICATION.md`](./AUTHENTICATION.md) ·
+[`AUTHORIZATION.md`](./AUTHORIZATION.md) · [`ORGANIZATIONS.md`](./ORGANIZATIONS.md) ·
+[`SECURITY.md`](./SECURITY.md).
+
 ### System prompt (server-side, layered)
 
 Assembled entirely on the server (`apps/web/src/server/ai/system-prompt.ts`),

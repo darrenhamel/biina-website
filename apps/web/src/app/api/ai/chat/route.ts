@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { toGatewayError, type ChatMessage, type ChatChunk } from '@biina/ai-gateway';
 import { getCurrentUser } from '@/server/auth/session';
+import { isPlatformAdmin } from '@/server/auth/permissions';
+import { resolveOrgContext } from '@/server/org/organizations';
 import {
   addMessage,
   createConversation,
@@ -11,7 +13,8 @@ import { startAssistantReply } from '@/server/ai/service';
 import type { RouteContext } from '@/server/ai/routing';
 import { isWorkload } from '@/config/ai-routing';
 import { chatRequestSchema } from '@/lib/validation';
-import { unauthorized, notFound, handleError } from '@/lib/api';
+import { WORKSPACE_COOKIE } from '@/server/org/constants';
+import { unauthorized, notFound, forbidden, handleError } from '@/lib/api';
 import { logger } from '@/lib/logger';
 
 /**
@@ -33,13 +36,28 @@ export async function POST(req: NextRequest) {
 
     const { conversationId, message, model, workload } = chatRequestSchema.parse(await req.json());
 
+    // Resolve the active workspace from a cookie and VERIFY membership server-side
+    // (never trust a browser-supplied org id). A suspended org blocks new AI usage.
+    let orgId: string | null = null;
+    let orgRole: string | null = null;
+    const workspaceSlug = req.cookies.get(WORKSPACE_COOKIE)?.value;
+    if (workspaceSlug && workspaceSlug !== 'personal') {
+      const ctx = await resolveOrgContext(user.id, workspaceSlug);
+      if (ctx) {
+        if (ctx.org.status !== 'ACTIVE') return forbidden('This workspace is unavailable.');
+        orgId = ctx.org.id;
+        orgRole = ctx.role;
+      }
+      // Not a member → silently fall back to personal (no access leak).
+    }
+
     let convId = conversationId;
     if (convId) {
       const owned = await getOwnedConversation(user.id, convId);
       if (!owned) return notFound('Conversation not found');
     } else {
       const title = message.slice(0, 60);
-      const created = await createConversation(user.id, title || 'New conversation');
+      const created = await createConversation(user.id, title || 'New conversation', undefined, orgId);
       convId = created.id;
     }
     const finalConvId = convId;
@@ -48,15 +66,17 @@ export async function POST(req: NextRequest) {
     const history = await listMessages(finalConvId);
     const chatMessages: ChatMessage[] = history.map((m) => ({ role: m.role, content: m.content }));
 
-    // Build a validated routing context. Privileged fields (plan, isAdmin) come
-    // from the authenticated session, NOT from the request body.
+    // Build a validated routing context. Privileged fields (plan, isAdmin, org)
+    // come from the authenticated session / verified membership, NOT the body.
     const routeContext: RouteContext = {
       userId: user.id,
       userPlan: user.plan,
-      isAdmin: user.role === 'ADMIN',
+      isAdmin: isPlatformAdmin(user.role),
       persona: user.personaId,
       workload: workload && isWorkload(workload) ? workload : undefined,
       requestedModelSlug: model ?? undefined,
+      organizationId: orgId,
+      organizationRole: orgRole,
     };
 
     const { requestId, meta, stream } = startAssistantReply({

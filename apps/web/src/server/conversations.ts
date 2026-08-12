@@ -25,10 +25,15 @@ export async function getOwnedConversation(userId: string, id: string) {
   return row ?? null;
 }
 
-export async function createConversation(userId: string, title: string, model?: string) {
+export async function createConversation(
+  userId: string,
+  title: string,
+  model?: string,
+  organizationId?: string | null,
+) {
   const [row] = await getDb()
     .insert(conversations)
-    .values({ userId, title, model })
+    .values({ userId, title, model, organizationId: organizationId ?? null })
     .returning();
   return row;
 }

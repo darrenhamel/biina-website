@@ -63,6 +63,27 @@ Legend: ☐ not started · ◐ in progress · ☑ done
 - ☑ Plans FREE→ADMIN (ADMIN = entitlement, not bypass); output caps to providers; user Usage page; admin Usage & Cost + Plans pages; plan assignment + budget APIs (audited).
 - ☑ 18 metering unit tests + live checks (ledger write, rate-limit 429, budget hard-block 503 with admin still reachable, plan assign, authz). No payments.
 
+## Phase 6 — Authentication hardening, user management & organizations  ☑  *(build prompt — identity track)*
+
+- ☑ Central permission service (`server/auth/permissions.ts`): PLATFORM roles
+  (USER / ADMIN / SUPER_ADMIN) kept DISTINCT from ORG roles (OWNER / ADMIN / MEMBER).
+  No inline `role === 'ADMIN'` anywhere — every gate calls a pure predicate.
+- ☑ Hardened auth: rate-limited login/signup/forgot/reset/verify, security-event log,
+  change-password (revokes other sessions), forgot/reset (no account enumeration,
+  single-use hashed tokens, all-session revoke on reset), email verification,
+  session listing + per-session & other-session revocation, account status
+  (ACTIVE/SUSPENDED/DISABLED) enforced in `getCurrentUser`.
+- ☑ Organizations + memberships + invitations: IDOR-safe `resolveOrgContext`
+  (server-verified membership — browser orgId never trusted), owner-count
+  protection, atomic single-use invitation accept, workspace cookie (hint only,
+  re-verified per request), per-org usage integration + plan/routing readiness.
+- ☑ Provider-independent email abstraction (dev provider; no paid vendor). CSRF
+  same-origin gate on state-changing API calls; HSTS + security headers.
+- ☑ Admin user & org management (suspend/reactivate/disable, super-admin role change,
+  org suspend). Migration `0003` (additive). Pure unit tests (authz matrix, slug,
+  rate-limit, validation, email safety) + live IDOR/isolation/suspension smoke.
+- **Deliverable:** multi-tenant identity ready; NO payments, SSO/SAML, or impersonation.
+
 ## Phase 7 — Cheap production deploy prep  ☐  *(build prompt 6)*
 
 - ☐ Production Dockerfile(s), `docker-compose.production.yml`, reverse proxy config.

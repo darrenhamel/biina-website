@@ -13,6 +13,25 @@ import { SESSION_COOKIE } from '@/server/auth/constants';
  */
 
 const PUBLIC_FILE = /\.(.*)$/;
+const MUTATING = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
+
+/**
+ * CSRF defense-in-depth: session cookies are SameSite=lax already, but we also
+ * reject state-changing API calls whose Origin doesn't match the request host.
+ * Only enforced when an Origin header is present (browsers always send it for
+ * fetch); same-origin server/tooling calls without Origin are unaffected.
+ */
+function isCrossOrigin(req: NextRequest): boolean {
+  const origin = req.headers.get('origin');
+  if (!origin) return false;
+  try {
+    const originHost = new URL(origin).host;
+    const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? req.nextUrl.host;
+    return originHost !== host;
+  } catch {
+    return true; // unparseable Origin → treat as cross-origin
+  }
+}
 
 function pickLocale(req: NextRequest): string {
   const cookieLocale = req.cookies.get('biina_locale')?.value;
@@ -26,13 +45,16 @@ function pickLocale(req: NextRequest): string {
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  // Skip API, Next internals, and static files.
-  if (
-    pathname.startsWith('/api') ||
-    pathname.startsWith('/_next') ||
-    pathname === '/favicon.ico' ||
-    PUBLIC_FILE.test(pathname)
-  ) {
+  // API: enforce same-origin on state-changing requests (CSRF), then pass through.
+  if (pathname.startsWith('/api')) {
+    if (MUTATING.has(req.method) && isCrossOrigin(req)) {
+      return NextResponse.json({ error: 'Cross-origin request refused' }, { status: 403 });
+    }
+    return NextResponse.next();
+  }
+
+  // Skip Next internals and static files.
+  if (pathname.startsWith('/_next') || pathname === '/favicon.ico' || PUBLIC_FILE.test(pathname)) {
     return NextResponse.next();
   }
 

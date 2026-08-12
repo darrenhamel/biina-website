@@ -136,6 +136,39 @@ export const updateBudgetSchema = z
   })
   .strict();
 
+// ---- Phase 6: identity ----
+
+export const changePasswordSchema = z.object({
+  currentPassword: z.string().min(1).max(200),
+  newPassword: passwordSchema,
+});
+export const forgotPasswordSchema = z.object({ email: emailSchema });
+export const resetPasswordSchema = z.object({ token: z.string().min(16).max(200), newPassword: passwordSchema });
+export const tokenSchema = z.object({ token: z.string().min(16).max(200) });
+
+// ---- Phase 6: organizations ----
+
+export const createOrgSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  slug: z.string().trim().max(48).optional(),
+});
+export const updateOrgSchema = z.object({ displayName: z.string().trim().min(2).max(120).optional() }).strict();
+const orgRoleEnum = z.enum(['OWNER', 'ADMIN', 'MEMBER']);
+export const inviteSchema = z.object({ email: emailSchema, role: orgRoleEnum.default('MEMBER') });
+export const memberRoleSchema = z.object({ role: orgRoleEnum });
+
+// ---- Phase 6: platform admin ----
+
+export const setUserStatusSchema = z.object({
+  status: z.enum(['ACTIVE', 'SUSPENDED', 'DISABLED']),
+  reason: z.string().trim().max(280).optional(),
+});
+export const setUserRoleSchema = z.object({ role: z.enum(['USER', 'ADMIN', 'SUPER_ADMIN']) });
+export const setOrgStatusSchema = z.object({
+  status: z.enum(['ACTIVE', 'SUSPENDED']),
+  reason: z.string().trim().max(280).optional(),
+});
+
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ChatRequestInput = z.infer<typeof chatRequestSchema>;

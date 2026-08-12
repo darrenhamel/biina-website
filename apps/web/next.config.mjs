@@ -8,22 +8,23 @@ const nextConfig = {
     ignoreDuringBuilds: false,
   },
   async headers() {
-    // Baseline security headers. Production tightening (HSTS, CSP) lands in Phase 5.
-    return [
-      {
-        source: '/:path*',
-        headers: [
-          { key: 'X-Content-Type-Options', value: 'nosniff' },
-          { key: 'X-Frame-Options', value: 'DENY' },
-          { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-          { key: 'X-DNS-Prefetch-Control', value: 'off' },
-          {
-            key: 'Permissions-Policy',
-            value: 'camera=(), microphone=(), geolocation=()',
-          },
-        ],
-      },
+    // Baseline security headers applied to every response. HSTS is emitted only
+    // in production (it must never be sent over plain-HTTP local dev, where it
+    // would wrongly pin localhost to HTTPS). A strict CSP is deferred to the
+    // Phase 7 production-deploy hardening, where the asset origins are fixed.
+    const isProd = process.env.NODE_ENV === 'production';
+    const headers = [
+      { key: 'X-Content-Type-Options', value: 'nosniff' },
+      { key: 'X-Frame-Options', value: 'DENY' },
+      { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+      { key: 'X-DNS-Prefetch-Control', value: 'off' },
+      { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+      { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), browsing-topics=()' },
     ];
+    if (isProd) {
+      headers.push({ key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' });
+    }
+    return [{ source: '/:path*', headers }];
   },
 };
 

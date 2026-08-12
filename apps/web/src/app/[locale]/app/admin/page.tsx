@@ -4,6 +4,7 @@ import { sql } from 'drizzle-orm';
 import { isLocale, type Locale } from '@/i18n/config';
 import { getDictionary } from '@/i18n/dictionaries';
 import { getCurrentUser } from '@/server/auth/session';
+import { isPlatformAdmin } from '@/server/auth/permissions';
 import { getDb } from '@/server/db';
 import { users, conversations, messages } from '@/server/db/schema';
 import { Icon } from '@/components/Icon';
@@ -23,7 +24,7 @@ export default async function AdminPage({ params }: { params: { locale: string }
   if (!user) redirect(`/${locale}/login`);
 
   // Basic authorization: admin-only area.
-  if (user.role !== 'ADMIN') {
+  if (!isPlatformAdmin(user.role)) {
     return (
       <div className="grid h-full place-items-center px-6 text-center">
         <div className="max-w-sm">
@@ -66,6 +67,8 @@ export default async function AdminPage({ params }: { params: { locale: string }
         </div>
 
         <div className="mt-4 grid gap-3">
+          <AdminLink href={`/${locale}/app/admin/users`} icon="user" title={dict.admin.users} sub={dict.admin.usersSub} />
+          <AdminLink href={`/${locale}/app/admin/orgs`} icon="templates" title={dict.admin.orgs} sub={dict.admin.orgsSub} />
           <AdminLink href={`/${locale}/app/admin/ai`} icon="spark" title={dict.admin.aiControl} sub={dict.admin.aiControlSub} />
           <AdminLink href={`/${locale}/app/admin/usage`} icon="discover" title={dict.admin.usageCost} sub={dict.admin.usageCostSub} />
           <AdminLink href={`/${locale}/app/admin/plans`} icon="templates" title={dict.admin.plans} sub={dict.admin.plansSub} />

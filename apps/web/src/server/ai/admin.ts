@@ -1,4 +1,4 @@
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, ilike } from 'drizzle-orm';
 import { getProvider } from '@biina/ai-gateway';
 import { getDb } from '@/server/db';
 import { aiProviders, aiModels, aiRoutes, aiSettings, users } from '@/server/db/schema';
@@ -7,7 +7,10 @@ import { invalidateAiConfig, loadAiConfig } from './catalog';
 import { validateConfig } from './routing';
 import { metricsSnapshot } from './metrics';
 import { writeAudit, recentAudit } from './audit';
+import { logSecurityEvent } from '@/server/auth/events';
+import { revokeAllSessions } from '@/server/auth/session';
 import { GatewayError } from '@biina/ai-gateway';
+import { conflict, notFound } from '@/lib/errors';
 
 const SETTINGS_ID = 'singleton';
 
@@ -295,19 +298,103 @@ export async function updateBudget(patch: Record<string, unknown>, adminUserId: 
   return { ok: true };
 }
 
-/** List users with their plan (for admin plan assignment). No secrets/content. */
-export async function listUsers(limit = 100) {
-  return getDb()
+/** List users with their plan/status/role (for admin management). No secrets/content. */
+export async function listUsers(query?: string, limit = 100) {
+  const base = getDb()
     .select({
       id: users.id,
       email: users.email,
       role: users.role,
       plan: users.plan,
+      status: users.status,
+      emailVerified: users.emailVerified,
       createdAt: users.createdAt,
     })
     .from(users)
     .orderBy(desc(users.createdAt))
-    .limit(limit);
+    .limit(Math.min(limit, 200));
+  if (query && query.trim()) {
+    return base.where(ilike(users.email, `%${query.trim()}%`));
+  }
+  return base;
+}
+
+type AccountStatus = 'ACTIVE' | 'SUSPENDED' | 'DISABLED';
+type PlatformUserRole = 'USER' | 'ADMIN' | 'SUPER_ADMIN';
+
+/**
+ * Suspend / reactivate / disable a platform account. Suspending or disabling
+ * revokes ALL of the user's sessions immediately so access is cut off at once.
+ * A self-suspension is refused so an admin can't lock themselves out.
+ */
+export async function setUserStatus(
+  userId: string,
+  status: AccountStatus,
+  actorUserId: string,
+  reason?: string,
+) {
+  const db = getDb();
+  const [prev] = await db
+    .select({ id: users.id, status: users.status, role: users.role })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!prev) throw notFound('User not found');
+  if (userId === actorUserId && status !== 'ACTIVE') {
+    throw conflict('You cannot suspend your own account');
+  }
+  if (prev.status === status) return { ok: true };
+
+  const reactivating = status === 'ACTIVE';
+  await db
+    .update(users)
+    .set({
+      status: status as never,
+      suspendedReason: reactivating ? null : reason ?? null,
+      suspendedBy: reactivating ? null : actorUserId,
+      suspendedAt: reactivating ? null : new Date(),
+      updatedAt: new Date(),
+    })
+    .where(eq(users.id, userId));
+
+  // Cutting off access: kill every session for a suspended/disabled account.
+  if (!reactivating) await revokeAllSessions(userId);
+
+  await logSecurityEvent({
+    event: reactivating ? 'account.reactivated' : 'account.suspended',
+    userId,
+    actorUserId,
+    metadata: { from: prev.status, to: status, ...(reason ? { reason } : {}) },
+  });
+  return { ok: true };
+}
+
+/**
+ * Change a user's PLATFORM role (USER / ADMIN / SUPER_ADMIN). Caller
+ * authorization (SUPER_ADMIN only) is enforced at the route. An admin cannot
+ * change their own role — that prevents accidental self-demotion / escalation.
+ */
+export async function setUserRole(userId: string, role: PlatformUserRole, actorUserId: string) {
+  const db = getDb();
+  if (userId === actorUserId) {
+    throw conflict('You cannot change your own role');
+  }
+  const [prev] = await db
+    .select({ id: users.id, role: users.role })
+    .from(users)
+    .where(eq(users.id, userId))
+    .limit(1);
+  if (!prev) throw notFound('User not found');
+  if (prev.role === role) return { ok: true };
+
+  await db.update(users).set({ role: role as never, updatedAt: new Date() }).where(eq(users.id, userId));
+  await logSecurityEvent({
+    event: 'role.changed',
+    userId,
+    actorUserId,
+    metadata: { from: prev.role, to: role },
+  });
+  return { ok: true };
 }
 
 function pickAudit(row: Record<string, unknown>, keys: string[]): Record<string, unknown> {

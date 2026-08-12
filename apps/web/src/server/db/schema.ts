@@ -30,10 +30,13 @@ import { relations } from 'drizzle-orm';
  *  - Message role is an enum shared conceptually with the AI gateway's ChatRole.
  */
 
-export const userRole = pgEnum('user_role', ['USER', 'ADMIN']);
+// Platform role (distinct from ORGANIZATION role — see Phase 6 tables).
+export const userRole = pgEnum('user_role', ['USER', 'ADMIN', 'SUPER_ADMIN']);
 export const messageRole = pgEnum('message_role', ['user', 'assistant', 'system']);
 // Plan tier — routing readiness (Phase 5 adds billing). Everyone is FREE for now.
 export const userPlan = pgEnum('user_plan', ['FREE', 'PRO', 'BUSINESS', 'ENTERPRISE', 'ADMIN']);
+// Account status — enforced server-side (Phase 6).
+export const accountStatus = pgEnum('account_status', ['ACTIVE', 'SUSPENDED', 'DISABLED']);
 
 export const users = pgTable(
   'users',
@@ -43,11 +46,18 @@ export const users = pgTable(
     passwordHash: text('password_hash').notNull(),
     role: userRole('role').notNull().default('USER'),
     plan: userPlan('plan').notNull().default('FREE'),
+    // Phase 6 — identity hardening.
+    status: accountStatus('status').notNull().default('ACTIVE'),
+    emailVerified: boolean('email_verified').notNull().default(false),
+    suspendedReason: varchar('suspended_reason', { length: 280 }),
+    suspendedBy: uuid('suspended_by'),
+    suspendedAt: timestamp('suspended_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     emailIdx: index('users_email_idx').on(t.email),
+    statusIdx: index('users_status_idx').on(t.status),
   }),
 );
 
@@ -73,6 +83,10 @@ export const sessions = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    // Phase 6 — non-invasive session metadata for the security page.
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    userAgent: varchar('user_agent', { length: 400 }),
+    ip: varchar('ip', { length: 64 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -87,6 +101,8 @@ export const conversations = pgTable(
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
+    // Tenant owner. NULL = personal conversation; set = organization workspace.
+    organizationId: uuid('organization_id'),
     title: varchar('title', { length: 200 }).notNull().default('New conversation'),
     // The logical model id last used (from the gateway registry). Not a vendor name.
     model: varchar('model', { length: 64 }),
@@ -95,6 +111,7 @@ export const conversations = pgTable(
   },
   (t) => ({
     userIdx: index('conversations_user_idx').on(t.userId),
+    orgIdx: index('conversations_org_idx').on(t.organizationId),
     updatedIdx: index('conversations_updated_idx').on(t.updatedAt),
   }),
 );
@@ -423,6 +440,136 @@ export const aiModelsRelations = relations(aiModels, ({ one }) => ({
   provider: one(aiProviders, { fields: [aiModels.providerId], references: [aiProviders.id] }),
 }));
 
+// ==========================================================================
+// Phase 6 — identity hardening + organizations (multi-tenant).
+//
+// PLATFORM roles (users.role) and ORGANIZATION roles (organization_members.role)
+// are DISTINCT authorities and never share a column. Tokens are stored HASHED.
+// ==========================================================================
+
+export const orgStatus = pgEnum('org_status', ['ACTIVE', 'SUSPENDED']);
+export const orgRole = pgEnum('org_role', ['OWNER', 'ADMIN', 'MEMBER']);
+export const inviteStatus = pgEnum('invite_status', ['PENDING', 'ACCEPTED', 'EXPIRED', 'REVOKED']);
+export const emailTokenType = pgEnum('email_token_type', ['verify', 'reset']);
+
+/** Security event log — auth/identity events. NEVER stores passwords or tokens. */
+export const securityEvents = pgTable(
+  'security_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+    actorUserId: uuid('actor_user_id'),
+    organizationId: uuid('organization_id'),
+    event: varchar('event', { length: 48 }).notNull(),
+    ip: varchar('ip', { length: 64 }),
+    userAgent: varchar('user_agent', { length: 400 }),
+    metadata: jsonb('metadata'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index('security_events_user_idx').on(t.userId),
+    createdIdx: index('security_events_created_idx').on(t.createdAt),
+  }),
+);
+
+/** Single-use, hashed, expiring tokens for email verification + password reset. */
+export const emailTokens = pgTable(
+  'email_tokens',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    type: emailTokenType('type').notNull(),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull().unique(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    usedAt: timestamp('used_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index('email_tokens_user_idx').on(t.userId),
+  }),
+);
+
+/** Organizations — tenant boundary for businesses/schools/gov/enterprise. */
+export const organizations = pgTable(
+  'organizations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    slug: varchar('slug', { length: 48 }).notNull().unique(),
+    name: varchar('name', { length: 120 }).notNull(),
+    displayName: varchar('display_name', { length: 120 }).notNull(),
+    status: orgStatus('status').notNull().default('ACTIVE'),
+    createdByUserId: uuid('created_by_user_id').references(() => users.id, { onDelete: 'set null' }),
+    // Org-level plan readiness (Phase 5 plans can later belong to an org).
+    planSlug: varchar('plan_slug', { length: 32 }),
+    // Seat/allowance readiness (not enforced yet).
+    maxSeats: integer('max_seats'),
+    suspendedReason: varchar('suspended_reason', { length: 280 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    slugIdx: index('organizations_slug_idx').on(t.slug),
+    statusIdx: index('organizations_status_idx').on(t.status),
+  }),
+);
+
+/** Organization membership — one row per (org, user). Carries the ORG role. */
+export const organizationMembers = pgTable(
+  'organization_members',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    role: orgRole('role').notNull().default('MEMBER'),
+    joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    orgUserUniq: unique('org_members_org_user_uniq').on(t.organizationId, t.userId),
+    orgIdx: index('org_members_org_idx').on(t.organizationId),
+    userIdx: index('org_members_user_idx').on(t.userId),
+  }),
+);
+
+/** Organization invitations — hashed, single-use, expiring tokens. */
+export const organizationInvitations = pgTable(
+  'organization_invitations',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id')
+      .notNull()
+      .references(() => organizations.id, { onDelete: 'cascade' }),
+    email: varchar('email', { length: 320 }).notNull(),
+    role: orgRole('role').notNull().default('MEMBER'),
+    tokenHash: varchar('token_hash', { length: 64 }).notNull().unique(),
+    status: inviteStatus('status').notNull().default('PENDING'),
+    invitedBy: uuid('invited_by').references(() => users.id, { onDelete: 'set null' }),
+    acceptedBy: uuid('accepted_by').references(() => users.id, { onDelete: 'set null' }),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    acceptedAt: timestamp('accepted_at', { withTimezone: true }),
+  },
+  (t) => ({
+    orgIdx: index('org_invites_org_idx').on(t.organizationId),
+    emailIdx: index('org_invites_email_idx').on(t.email),
+  }),
+);
+
+export const organizationsRelations = relations(organizations, ({ many }) => ({
+  members: many(organizationMembers),
+}));
+export const organizationMembersRelations = relations(organizationMembers, ({ one }) => ({
+  organization: one(organizations, { fields: [organizationMembers.organizationId], references: [organizations.id] }),
+  user: one(users, { fields: [organizationMembers.userId], references: [users.id] }),
+}));
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Profile = typeof profiles.$inferSelect;
@@ -436,3 +583,8 @@ export type Plan = typeof plans.$inferSelect;
 export type PlanAssignment = typeof planAssignments.$inferSelect;
 export type UsageEvent = typeof usageEvents.$inferSelect;
 export type NewUsageEvent = typeof usageEvents.$inferInsert;
+export type Organization = typeof organizations.$inferSelect;
+export type OrganizationMember = typeof organizationMembers.$inferSelect;
+export type OrganizationInvitation = typeof organizationInvitations.$inferSelect;
+export type SecurityEvent = typeof securityEvents.$inferSelect;
+export type EmailToken = typeof emailTokens.$inferSelect;

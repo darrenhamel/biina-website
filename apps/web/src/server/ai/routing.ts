@@ -37,6 +37,11 @@ export interface RouteContext {
   requestedModelSlug?: string | null;
   /** Extra required capabilities on top of the workload's. */
   requiredCapabilities?: Capability[];
+  // Organization context — only ever set AFTER server-side membership verification.
+  // Readiness for org-plan / org-type routing rules (not yet enforced).
+  organizationId?: string | null;
+  organizationRole?: string | null;
+  organizationPlan?: string | null;
 }
 
 export interface RouteDecision {

@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { ZodError } from 'zod';
+import { isGatewayError } from '@biina/ai-gateway';
+import { isAppError } from './errors';
 import { logger } from './logger';
 
 /**
@@ -33,6 +35,21 @@ export function handleError(err: unknown, context: string) {
     return NextResponse.json(
       { error: 'Invalid request', details: err.flatten().fieldErrors },
       { status: 400 },
+    );
+  }
+  // Domain/business-rule errors: safe, specific message meant for the client.
+  if (isAppError(err)) {
+    return NextResponse.json(
+      { error: err.message, code: err.code, ...(err.data ? { data: err.data } : {}) },
+      { status: err.status },
+    );
+  }
+  // Gateway errors: surface only the SAFE generic message + code, never internals.
+  if (isGatewayError(err)) {
+    if (err.httpStatus() >= 500) logger.error('api.gateway', { context, code: err.code, error: err.message });
+    return NextResponse.json(
+      { error: err.userMessage(), code: err.code, ...(err.data ? { data: err.data } : {}) },
+      { status: err.httpStatus() },
     );
   }
   logger.error('api.unhandled', { context, error: String(err) });

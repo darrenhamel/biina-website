@@ -49,7 +49,8 @@ async function seedUsers(db: DB) {
       email: process.env.SEED_ADMIN_EMAIL || 'admin@biina.local',
       password: process.env.SEED_ADMIN_PASSWORD || 'biina-admin-123',
       displayName: 'BIINA Admin',
-      role: 'ADMIN' as const,
+      // SUPER_ADMIN so the platform role-change control plane is exercisable locally.
+      role: 'SUPER_ADMIN' as const,
     },
     {
       email: process.env.SEED_USER_EMAIL || 'user@biina.local',
@@ -65,7 +66,11 @@ async function seedUsers(db: DB) {
       continue;
     }
     const passwordHash = await bcrypt.hash(s.password, 12);
-    const [u] = await db.insert(users).values({ email: s.email, passwordHash, role: s.role }).returning({ id: users.id });
+    // Seeded accounts are pre-verified and ACTIVE (status defaults to ACTIVE).
+    const [u] = await db
+      .insert(users)
+      .values({ email: s.email, passwordHash, role: s.role, emailVerified: true })
+      .returning({ id: users.id });
     await db.insert(profiles).values({ userId: u.id, displayName: s.displayName });
     console.log(`✓ ${s.role} ${s.email}`);
   }

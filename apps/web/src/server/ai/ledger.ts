@@ -69,6 +69,20 @@ export async function userUsageWindows(userId: string, now: Date): Promise<Usage
   };
 }
 
+/** Aggregate usage for a single organization (month-to-date). */
+export async function orgUsageSummary(orgId: string, now: Date) {
+  const [row] = await getDb()
+    .select({
+      requests: sql<number>`count(*)::int`,
+      tokens: sql<number>`coalesce(sum(${usageEvents.totalTokens}), 0)::int`,
+      cost: sql<number>`coalesce(sum(${usageEvents.estimatedTotalCost}), 0)::float`,
+      activeUsers: sql<number>`count(distinct ${usageEvents.userId})::int`,
+    })
+    .from(usageEvents)
+    .where(and(eq(usageEvents.organizationId, orgId), gte(usageEvents.createdAt, startOfUtcMonth(now))));
+  return { requests: row?.requests ?? 0, tokens: row?.tokens ?? 0, cost: row?.cost ?? 0, activeUsers: row?.activeUsers ?? 0 };
+}
+
 /** Platform-wide estimated spend (all events) for budget checks. */
 export async function platformSpend(now: Date): Promise<{ day: number; month: number }> {
   const db = getDb();
