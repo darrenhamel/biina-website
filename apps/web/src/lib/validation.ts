@@ -382,6 +382,20 @@ export const voiceMediaSettingsSchema = z
   })
   .strict();
 
+// ---- Phase 15: advanced research ----
+
+export const startResearchSchema = z
+  .object({
+    objective: z.string().trim().min(8).max(4000),
+    depth: z.enum(['QUICK', 'STANDARD', 'DEEP']).default('STANDARD'),
+    knowledgeBaseIds: z.array(z.string().uuid()).max(20).optional(),
+    connectionIds: z.array(z.string().uuid()).max(8).optional(),
+    webEnabled: z.boolean().optional(),
+    // Auto-start after planning (deep research may require an explicit run instead).
+    autoStart: z.boolean().optional(),
+  })
+  .strict();
+
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ChatRequestInput = z.infer<typeof chatRequestSchema>;

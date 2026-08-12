@@ -100,7 +100,20 @@ export type SecurityEventType =
   | 'media.ocr'
   | 'media.transcribed'
   | 'media.synthesized'
-  | 'media.rejected';
+  | 'media.rejected'
+  // Phase 15 — advanced research / multi-agent orchestration.
+  | 'research.started'
+  | 'research.plan_generated'
+  | 'research.task_started'
+  | 'research.task_completed'
+  | 'research.source_accessed'
+  | 'research.claim_verified'
+  | 'research.conflict_detected'
+  | 'research.synthesis_completed'
+  | 'research.completed'
+  | 'research.canceled'
+  | 'research.budget_exhausted'
+  | 'research.blocked';
 
 export async function logSecurityEvent(entry: {
   event: SecurityEventType;

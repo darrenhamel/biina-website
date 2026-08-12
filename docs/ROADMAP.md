@@ -463,6 +463,71 @@ Legend: ☐ not started · ◐ in progress · ☑ done
   `SPEECH_TO_TEXT.md`, `TEXT_TO_SPEECH.md`, `VOICE_MODE.md`, `MULTIMODAL_SECURITY.md`,
   `MULTIMODAL_COSTS.md`, `MULTIMODAL_ACTIVATION_CHECKLIST.md`.
 
+## Phase 15 — Advanced research & CONTROLLED multi-agent orchestration  ☑  *(build prompt — research track)*
+
+- ☑ **ResearchOrchestrator — the ONLY planner/delegator** (`orchestrator.ts`):
+  `planResearch` (bounded, acyclic plan via `buildPlan` + `isAcyclic`) + `runResearch`
+  (topological DAG execution, parallel specialists ≤ limit, agent-run + source + deadline
+  budgets, then verify + synthesize). Budget exhausted → **stop launching + synthesize
+  what exists** (`PARTIALLY_COMPLETED`); cancellation checked between task batches.
+  Reuses Phase 11 AgentOrchestrator patterns + Phase 8–10 retrieval + budgets — no
+  separate agent runtime. **Nothing here is alterable by source content.**
+- ☑ **Bounded delegation, hard ceilings** (`config.ts`): delegation depth fixed at **1**
+  (`MAX_DELEGATION_DEPTH`) — orchestrator → specialist, no nesting, no self-creation.
+  Platform ceilings model/source can never raise: `RESEARCH_MAX_PARALLEL_AGENTS` (4),
+  `RESEARCH_MAX_TOTAL_AGENT_RUNS` (12), `RESEARCH_MAX_TASKS` (8), `RESEARCH_MAX_SOURCES`
+  (40), `RESEARCH_MAX_RUNTIME_MS` (240000); depth→budget (QUICK/STANDARD/DEEP) clamped to
+  them. Effective = min(platform, plan, depth).
+- ☑ **Read-only specialist profiles** (`profiles.ts`): seven — web-researcher,
+  internal-knowledge-analyst, document-analyst, connected-data-analyst,
+  comparison-analyst, fact-checker, synthesis-analyst — **configuration only**, no
+  credentials, no independent permissions. Minimized read-only tool + source-type
+  allowlist; `profileIsReadOnly` structurally forbids any write tool. Executor
+  (`specialists.ts`) is a bounded read-only worker using only scope ∩ profile; refuses a
+  non-read-only/unknown profile; cannot create tasks/agents, widen scope, or write.
+- ☑ **Tenant-isolated source provider** (`sources.ts`): delegates to the existing
+  web / RAG / connected retrieval (Phase 8–10 authorization + provenance + injection
+  boundaries inherited); private content never sent to public web search;
+  deterministic-offline + injectable for tests.
+- ☑ **Evidence + citations** (`evidence.ts`, `conflict.ts`, `synthesis.ts`): evidence
+  with provenance + quality metadata (no misleading "truth score"), dedup by content
+  hash; findings link claims to **validated** evidence ids (unsupported major claims
+  dropped); `detectConflicts` surfaces disagreement (flags CONFLICTING, never
+  auto-resolves); grounded, versioned synthesis with every citation validated
+  (fabricated ids rejected) and unresolved conflicts surfaced as uncertainties.
+- ☑ **Sessions, quotas, admin** (`sessions.ts`, `quotas.ts`, `admin.ts`):
+  `resolveResearchAccess` (personal→owner; org→active org + verified member; IDOR-safe →
+  404); `resolveLimits` + `assertResearchQuota` (plan.advancedResearchEnabled /
+  deepResearchEnabled / monthly runs); `researchOverview` (metadata only) +
+  RESEARCH_TEMPLATES (Market Analysis, Competitor Comparison, Vendor Due Diligence,
+  Regulatory Research, Executive Brief).
+- ☑ **Schema + plan columns**: research_sessions, research_tasks (DAG via
+  dependsOnTaskIds), research_evidence (provenance + quality + content hash),
+  research_findings (SUPPORTED / PARTIALLY_SUPPORTED / CONFLICTING / UNVERIFIED),
+  research_conflicts, research_results (versioned; citationIds; partial); plan gained
+  advancedResearchEnabled, deepResearchEnabled, researchRunsPerMonth, maxResearchTasks,
+  maxSourcesPerResearch, maxParallelAgents, maxResearchCost. Security events `research.*`.
+- ☑ **APIs**: `research` (POST start / GET list — QUICK/STANDARD auto-start, DEEP plans
+  then needs an explicit run), `research/[id]` (detail), `research/[id]/run`,
+  `research/[id]/cancel`, `research/templates`, `admin/research`.
+- **Deliverable:** a bounded research mode that plans, dispatches read-only specialists,
+  verifies, and synthesizes a cited report — **multi-agent ≠ multiple authorities**
+  (every specialist subordinate to platform → org → user → plan → budget → tool → action
+  policy), no uncontrolled swarm (one planner, depth 1, hard ceilings), read-only
+  specialists (no write tool anywhere), evidence traceability (Final Claim → Finding →
+  Evidence → Source with validated citations), tenant isolation + prompt-injection /
+  exfiltration defense. Flags `ADVANCED_RESEARCH_ENABLED` (default true),
+  `MULTI_AGENT_RESEARCH_ENABLED` (default true — false forces sequential), and
+  `RESEARCH_WEB_ENABLED` (default true — research continues on internal data when off).
+  Write actions still require **Phase 11 approval** ("email me the results" separates the
+  read-only research from the email action). Readiness only: real retrieval is wired via
+  web / RAG / connected (the source provider is deterministic-offline here),
+  per-specialist model routing, follow-up/resume, background-worker execution,
+  multi-model comparison, per-unit research cost service, research→KB / file export.
+  Docs: `ADVANCED_RESEARCH.md`, `MULTI_AGENT_ORCHESTRATION.md`, `SPECIALIST_AGENTS.md`,
+  `RESEARCH_EVIDENCE.md`, `RESEARCH_CITATIONS.md`, `RESEARCH_SECURITY.md`,
+  `RESEARCH_COSTS.md`, `ADVANCED_RESEARCH_ACTIVATION_CHECKLIST.md`.
+
 ## Phase 10 — Pre-launch audit  ☐  *(build prompt 8)*
 
 - ☐ Audit all 24 areas; run typecheck / lint / tests / prod build / migration validation / dep-security.

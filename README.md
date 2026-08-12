@@ -445,6 +445,42 @@ entitlements and quotas. See
 [`docs/MULTIMODAL_COSTS.md`](./docs/MULTIMODAL_COSTS.md), and
 [`docs/MULTIMODAL_ACTIVATION_CHECKLIST.md`](./docs/MULTIMODAL_ACTIVATION_CHECKLIST.md).
 
+**Added (Phase 15):** **advanced research & controlled multi-agent orchestration** —
+from a single objective, BIINA.ai runs a **bounded, multi-step investigation**: it plans
+a small set of research tasks, dispatches **read-only specialist agents** to gather
+evidence from the sources you authorized (public web, your knowledge bases, your
+connected apps), verifies key claims, surfaces disagreements, and synthesizes an
+**evidence-based report with validated citations**. The one rule that shapes everything:
+**multi-agent does NOT mean multiple authorities.** There is exactly one planner and
+delegator — the research orchestrator — and every specialist it dispatches is a
+subordinate, **read-only, tool-minimized** worker with **no credentials and no write tool
+of any kind**. Research is **bounded, not an uncontrolled swarm**: delegation is one
+level deep (an agent can never spawn more agents), and hard platform ceilings on parallel
+agents, total agent runs, tasks, sources, and runtime **cannot be raised by the model or
+by anything a source says**. Only the orchestrator plans — **source content can never add
+a task, widen a budget, grant a tool, or change a permission** (research-plan-poisoning
+and source-tool-injection are structurally blocked), and a specialist can't be induced to
+fetch unrelated private data or write anything out. Every claim traces **Final Claim →
+Finding → Evidence → Source**; citations are **validated against the evidence actually
+retrieved under your authorization**, so a **fabricated citation is rejected and never
+displayed**; duplicate sources are de-duplicated, and where sources disagree BIINA
+**surfaces the conflict as an explicit uncertainty rather than silently picking a
+winner**. Runs are **tenant-isolated** (one workspace per session; Org A never reads Org
+B), plan-gated and quota-limited; when a budget is reached BIINA **stops and synthesizes
+what it has** (a clearly-marked partial report) instead of overspending. The **source
+provider is deterministic-offline** in this environment and delegates to the real web /
+RAG / connected retrieval layers in production. And research is **read-only** — an "email
+me the results" request separates the research from the email, and **the email still
+requires Phase 11 approval**. See
+[`docs/ADVANCED_RESEARCH.md`](./docs/ADVANCED_RESEARCH.md),
+[`docs/MULTI_AGENT_ORCHESTRATION.md`](./docs/MULTI_AGENT_ORCHESTRATION.md),
+[`docs/SPECIALIST_AGENTS.md`](./docs/SPECIALIST_AGENTS.md),
+[`docs/RESEARCH_EVIDENCE.md`](./docs/RESEARCH_EVIDENCE.md),
+[`docs/RESEARCH_CITATIONS.md`](./docs/RESEARCH_CITATIONS.md),
+[`docs/RESEARCH_SECURITY.md`](./docs/RESEARCH_SECURITY.md),
+[`docs/RESEARCH_COSTS.md`](./docs/RESEARCH_COSTS.md), and
+[`docs/ADVANCED_RESEARCH_ACTIVATION_CHECKLIST.md`](./docs/ADVANCED_RESEARCH_ACTIVATION_CHECKLIST.md).
+
 **Deferred:** **real external write actions** (the agent ships write-capable but on
 the mock adapter; real Gmail/Calendar/Slack writes require manual activation),
 **scheduled external writes** (off by default; need a standing authorization **and**

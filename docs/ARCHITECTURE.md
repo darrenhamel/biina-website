@@ -693,6 +693,88 @@ Details: [`MULTIMODAL_ARCHITECTURE.md`](./MULTIMODAL_ARCHITECTURE.md) ·
 [`MULTIMODAL_SECURITY.md`](./MULTIMODAL_SECURITY.md) · [`MULTIMODAL_COSTS.md`](./MULTIMODAL_COSTS.md) ·
 [`MULTIMODAL_ACTIVATION_CHECKLIST.md`](./MULTIMODAL_ACTIVATION_CHECKLIST.md).
 
+## 4l. Advanced research & CONTROLLED multi-agent orchestration (Phase 15)
+
+Gives BIINA.ai a **research mode**: from one objective it runs a **bounded, multi-step
+investigation** — plans a small task DAG, dispatches **read-only specialist agents** to
+gather evidence from the sources the user authorized, verifies key claims, surfaces
+disagreements, and synthesizes a **cited, evidence-based report**. The organizing
+principle is one sentence: **multi-agent does NOT mean multiple authorities.** There is
+exactly one planner/delegator — the `ResearchOrchestrator` — and every specialist is a
+subordinate, bounded, read-only, tool-minimized worker. Research is **not** a new
+runtime: the orchestrator **reuses** the Phase 11 `AgentOrchestrator` patterns, the
+Phase 10 `ToolExecutionService` + Phase 8–10 retrieval (web / RAG / connected), the
+Phase 13 ContextEngine posture, and the same server-side budgets + audit — with **no
+external-write path** (specialists have none). Code: `apps/web/src/server/research/`.
+
+```
+POST /api/research (objective + authorized source scope, plan-gated, quota-checked)
+  → ResearchOrchestrator.planResearch  (buildPlan → bounded, ACYCLIC task DAG; source content can NEVER add a task)
+  → runResearch:
+       retrieval specialists (parallel ≤ limit) → ResearchSourceProvider → web / RAG / connected (tenant-isolated)
+            → evidence (provenance + quality metadata, dedup by content hash)
+            → findings (claim ↔ VALIDATED evidence ids)
+       verify → detectConflicts (surface disagreement, flag CONFLICTING; never auto-resolve)
+       synthesize → grounded, versioned ResearchResult (validated citations; unresolved conflicts = uncertainties)
+  budget exhausted → STOP launching + synthesize what exists → PARTIALLY_COMPLETED
+```
+
+- **One orchestrator, bounded delegation.** Only `ResearchOrchestrator` creates tasks;
+  specialists cannot create tasks/agents or delegate. Depth is fixed at **1**
+  (`MAX_DELEGATION_DEPTH`) — orchestrator → specialist, no nesting. Plans are validated
+  acyclic (`isAcyclic`). Hard ceilings the model/source can never raise:
+  `RESEARCH_MAX_PARALLEL_AGENTS` (4), `RESEARCH_MAX_TOTAL_AGENT_RUNS` (12),
+  `RESEARCH_MAX_TASKS` (8), `RESEARCH_MAX_SOURCES` (40), `RESEARCH_MAX_RUNTIME_MS`
+  (240000). Effective budget = `min(platform, plan, depth)`.
+- **Read-only, tool-minimized specialists (`profiles.ts`).** Seven profiles
+  (web-researcher, internal-knowledge-analyst, document-analyst, connected-data-analyst,
+  comparison-analyst, fact-checker, synthesis-analyst) — **configuration only**, no
+  credentials, no independent permissions. Each carries a minimized read-only tool +
+  source-type allowlist; `profileIsReadOnly` structurally forbids any write tool and the
+  executor refuses a non-read-only/unknown profile. A specialist uses only its task's
+  tools/source types (scope ∩ profile) and **cannot write to any external system** — an
+  "email me the results" request stays a Phase 11 action behind approval.
+- **Evidence, findings, citations.** Retrieval flows through the `ResearchSourceProvider`
+  (delegates to the tenant-isolated Phase 8–10 layers; private content never sent to
+  public web search; deterministic-offline + injectable for tests). Evidence carries
+  **provenance + safe quality metadata** (primary/official/domain/date — never a
+  misleading "truth score"), deduplicated by content hash. Findings link a claim to
+  **validated** evidence ids; unsupported major claims are dropped. Synthesis is grounded
+  strictly on verified findings, every citation validated against the evidence store
+  (**fabricated citations rejected, never displayed**), conflicts surfaced as
+  uncertainties. Traceability: Final Claim → Finding → Evidence → Source.
+- **Tenant isolation + injection defense.** One session belongs to one workspace context
+  (`resolveResearchAccess`: personal → owner; org → active org + verified member;
+  else → null → 404). Source content is untrusted DATA — it can never change the plan,
+  budget, tools, permissions, or policy (research-plan-poisoning + source-tool-injection
+  defense); a specialist can't be induced to fetch unrelated private data or write
+  externally (cross-source exfiltration defense).
+- **Additive schema + APIs.** `research_sessions`, `research_tasks` (DAG via
+  `dependsOnTaskIds`), `research_evidence`, `research_findings` (status SUPPORTED /
+  PARTIALLY_SUPPORTED / CONFLICTING / UNVERIFIED), `research_conflicts`,
+  `research_results` (versioned; `citationIds`; `partial`); plan columns
+  `advancedResearchEnabled`, `deepResearchEnabled`, `researchRunsPerMonth`,
+  `maxResearchTasks`, `maxSourcesPerResearch`, `maxParallelAgents`, `maxResearchCost`.
+  APIs: `research` (POST start / GET list), `research/[id]` (detail), `.../run`,
+  `.../cancel`, `research/templates`, `admin/research` (metadata only). Flags
+  `ADVANCED_RESEARCH_ENABLED` (default true), `MULTI_AGENT_RESEARCH_ENABLED` (default
+  true — false forces sequential/1 agent), `RESEARCH_WEB_ENABLED` (default true —
+  research continues on internal data when off). Security events `research.*`.
+- **Readiness only.** The source provider is **deterministic-offline** in this
+  environment (delegates to the real web / RAG / connected layers in production);
+  per-specialist model routing, follow-up/resume flow, background-worker execution of
+  long runs, multi-model comparison, a per-unit research cost service, and research→KB /
+  file export are readiness — the schema + services are shaped for them.
+
+Details: [`ADVANCED_RESEARCH.md`](./ADVANCED_RESEARCH.md) ·
+[`MULTI_AGENT_ORCHESTRATION.md`](./MULTI_AGENT_ORCHESTRATION.md) ·
+[`SPECIALIST_AGENTS.md`](./SPECIALIST_AGENTS.md) ·
+[`RESEARCH_EVIDENCE.md`](./RESEARCH_EVIDENCE.md) ·
+[`RESEARCH_CITATIONS.md`](./RESEARCH_CITATIONS.md) ·
+[`RESEARCH_SECURITY.md`](./RESEARCH_SECURITY.md) ·
+[`RESEARCH_COSTS.md`](./RESEARCH_COSTS.md) ·
+[`ADVANCED_RESEARCH_ACTIVATION_CHECKLIST.md`](./ADVANCED_RESEARCH_ACTIVATION_CHECKLIST.md).
+
 ### System prompt (server-side, layered)
 
 Assembled entirely on the server (`apps/web/src/server/ai/system-prompt.ts`),

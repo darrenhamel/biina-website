@@ -420,6 +420,14 @@ export const plans = pgTable('plans', {
   voiceModeEnabled: boolean('voice_mode_enabled').notNull().default(false),
   voiceMinutesPerMonth: integer('voice_minutes_per_month'),
   mediaStorageBytesLimit: bigint('media_storage_bytes_limit', { mode: 'number' }),
+  // Phase 15 — advanced research + multi-agent. null = unlimited for a limit.
+  advancedResearchEnabled: boolean('advanced_research_enabled').notNull().default(false),
+  deepResearchEnabled: boolean('deep_research_enabled').notNull().default(false),
+  researchRunsPerMonth: integer('research_runs_per_month'),
+  maxResearchTasks: integer('max_research_tasks'),
+  maxSourcesPerResearch: integer('max_sources_per_research'),
+  maxParallelAgents: integer('max_parallel_agents'),
+  maxResearchCost: real('max_research_cost'),
   // Routing priority class (lower = higher priority). Readiness for priority routing.
   priorityClass: integer('priority_class').notNull().default(100),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -1820,3 +1828,178 @@ export type MediaProcessingJob = typeof mediaProcessingJobs.$inferSelect;
 export type AudioTranscript = typeof audioTranscripts.$inferSelect;
 export type VoiceProfile = typeof voiceProfiles.$inferSelect;
 export type MediaUsageEvent = typeof mediaUsageEvents.$inferSelect;
+
+// ==========================================================================
+// Phase 15 — advanced research & CONTROLLED multi-agent orchestration.
+//
+// Multi-agent does NOT mean multiple authorities. A specialist agent is a bounded,
+// READ-ONLY, tool-minimized executor subordinate to every existing layer (platform
+// safety → org policy → user perms → plan → research budget → tool policy → action
+// policy). Only the trusted ResearchOrchestrator creates tasks; specialists cannot
+// create agents or delegate. Source content is untrusted and can never change the
+// plan, budget, tools, permissions, or policy. Every citation must resolve to real,
+// authorized evidence (no fabricated sources). One session belongs to one tenant.
+// ==========================================================================
+
+export const researchStatus = pgEnum('research_status', ['PLANNING', 'RUNNING', 'SYNTHESIZING', 'AWAITING_APPROVAL', 'COMPLETED', 'PARTIALLY_COMPLETED', 'FAILED', 'CANCELED', 'BLOCKED']);
+export const researchTaskStatus = pgEnum('research_task_status', ['PENDING', 'RUNNING', 'COMPLETED', 'FAILED', 'SKIPPED', 'BLOCKED']);
+export const researchTaskType = pgEnum('research_task_type', ['WEB_RESEARCH', 'PRIVATE_KNOWLEDGE_RESEARCH', 'CONNECTED_DATA_RESEARCH', 'DOCUMENT_ANALYSIS', 'COMPARISON', 'VERIFICATION', 'SYNTHESIS_SUPPORT']);
+export const researchSourceType = pgEnum('research_source_type', ['PUBLIC_WEB', 'PRIMARY_OFFICIAL_SOURCE', 'PRIVATE_DOCUMENT', 'KNOWLEDGE_BASE', 'CONNECTED_EMAIL', 'CONNECTED_FILE', 'CONNECTED_MESSAGE', 'CONNECTED_RECORD', 'MULTIMODAL_SOURCE']);
+export const researchDepth = pgEnum('research_depth', ['QUICK', 'STANDARD', 'DEEP']);
+export const findingStatus = pgEnum('finding_status', ['SUPPORTED', 'PARTIALLY_SUPPORTED', 'CONFLICTING', 'UNVERIFIED']);
+export const researchConflictStatus = pgEnum('research_conflict_status', ['OPEN', 'RESOLVED', 'UNRESOLVED']);
+
+/** A bounded advanced-research run. Budgets + limits are server-authoritative. */
+export const researchSessions = pgTable(
+  'research_sessions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+    conversationId: uuid('conversation_id'),
+    objective: text('objective').notNull(),
+    status: researchStatus('status').notNull().default('PLANNING'),
+    depth: researchDepth('depth').notNull().default('STANDARD'),
+    // Hard budgets (effective = min(plan, depth, platform)).
+    maxTasks: integer('max_tasks').notNull().default(4),
+    maxAgentRuns: integer('max_agent_runs').notNull().default(6),
+    maxSources: integer('max_sources').notNull().default(20),
+    maxParallelAgents: integer('max_parallel_agents').notNull().default(3),
+    maxCost: real('max_cost'),
+    maxDurationMs: integer('max_duration_ms').notNull().default(180_000),
+    // Consumption counters.
+    tasksCreated: integer('tasks_created').notNull().default(0),
+    tasksCompleted: integer('tasks_completed').notNull().default(0),
+    sourcesCollected: integer('sources_collected').notNull().default(0),
+    agentRunsUsed: integer('agent_runs_used').notNull().default(0),
+    estimatedCost: real('estimated_cost').notNull().default(0),
+    // A concise, user-facing plan (questions/areas) — NOT hidden reasoning.
+    plan: jsonb('plan').$type<{ questions: string[]; areas: string[] }>(),
+    // Requested source scope selected by the user (what the run may touch).
+    knowledgeBaseIds: jsonb('knowledge_base_ids').notNull().$type<string[]>().default([]),
+    connectionIds: jsonb('connection_ids').notNull().$type<string[]>().default([]),
+    webEnabled: boolean('web_enabled').notNull().default(true),
+    error: varchar('error', { length: 400 }),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    canceledAt: timestamp('canceled_at', { withTimezone: true }),
+    deadlineAt: timestamp('deadline_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index('research_sessions_user_idx').on(t.userId),
+    orgIdx: index('research_sessions_org_idx').on(t.organizationId),
+    statusIdx: index('research_sessions_status_idx').on(t.status),
+    createdIdx: index('research_sessions_created_idx').on(t.createdAt),
+  }),
+);
+
+/** A discrete research task (node in a DAG). Scope + tools are minimized per profile. */
+export const researchTasks = pgTable(
+  'research_tasks',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    researchSessionId: uuid('research_session_id').notNull().references(() => researchSessions.id, { onDelete: 'cascade' }),
+    title: varchar('title', { length: 240 }).notNull(),
+    objective: text('objective').notNull(),
+    taskType: researchTaskType('task_type').notNull(),
+    status: researchTaskStatus('status').notNull().default('PENDING'),
+    priority: integer('priority').notNull().default(100),
+    assignedProfile: varchar('assigned_profile', { length: 48 }).notNull(),
+    // Minimized surface — READ-ONLY tools + the source types this task may touch.
+    allowedTools: jsonb('allowed_tools').notNull().$type<string[]>().default([]),
+    allowedSourceTypes: jsonb('allowed_source_types').notNull().$type<string[]>().default([]),
+    scope: varchar('scope', { length: 400 }),
+    maxSources: integer('max_sources').notNull().default(6),
+    maxCost: real('max_cost'),
+    dependsOnTaskIds: jsonb('depends_on_task_ids').notNull().$type<string[]>().default([]),
+    error: varchar('error', { length: 400 }),
+    startedAt: timestamp('started_at', { withTimezone: true }),
+    completedAt: timestamp('completed_at', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ sessionIdx: index('research_tasks_session_idx').on(t.researchSessionId), statusIdx: index('research_tasks_status_idx').on(t.status) }),
+);
+
+/** A piece of evidence with provenance. Does NOT copy whole source documents. */
+export const researchEvidence = pgTable(
+  'research_evidence',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    researchSessionId: uuid('research_session_id').notNull().references(() => researchSessions.id, { onDelete: 'cascade' }),
+    taskId: uuid('task_id'),
+    sourceType: researchSourceType('source_type').notNull(),
+    sourceId: varchar('source_id', { length: 400 }), // e.g. url / documentId / connector externalId
+    title: varchar('title', { length: 400 }),
+    sourceReference: varchar('source_reference', { length: 500 }),
+    excerpt: text('excerpt'),
+    publishedAt: timestamp('published_at', { withTimezone: true }),
+    retrievedAt: timestamp('retrieved_at', { withTimezone: true }).notNull().defaultNow(),
+    relevanceScore: real('relevance_score'),
+    // Safe metadata (primary/official/domain/date) — never a misleading "truth score".
+    qualityMetadata: jsonb('quality_metadata').$type<Record<string, unknown>>(),
+    contentHash: varchar('content_hash', { length: 64 }), // dedup
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ sessionIdx: index('research_evidence_session_idx').on(t.researchSessionId), taskIdx: index('research_evidence_task_idx').on(t.taskId) }),
+);
+
+/** A structured finding linked to real evidence. Unsupported major claims are rejected. */
+export const researchFindings = pgTable(
+  'research_findings',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    researchSessionId: uuid('research_session_id').notNull().references(() => researchSessions.id, { onDelete: 'cascade' }),
+    taskId: uuid('task_id'),
+    claim: varchar('claim', { length: 1000 }).notNull(),
+    summary: text('summary'),
+    evidenceIds: jsonb('evidence_ids').notNull().$type<string[]>().default([]),
+    confidence: real('confidence').notNull().default(0.5),
+    status: findingStatus('status').notNull().default('UNVERIFIED'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ sessionIdx: index('research_findings_session_idx').on(t.researchSessionId), taskIdx: index('research_findings_task_idx').on(t.taskId) }),
+);
+
+/** A detected disagreement between sources — surfaced, never silently resolved. */
+export const researchConflicts = pgTable(
+  'research_conflicts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    researchSessionId: uuid('research_session_id').notNull().references(() => researchSessions.id, { onDelete: 'cascade' }),
+    topic: varchar('topic', { length: 500 }).notNull(),
+    evidenceAId: uuid('evidence_a_id'),
+    evidenceBId: uuid('evidence_b_id'),
+    status: researchConflictStatus('status').notNull().default('OPEN'),
+    resolutionSummary: text('resolution_summary'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ sessionIdx: index('research_conflicts_session_idx').on(t.researchSessionId) }),
+);
+
+/** The final synthesized report (versioned). Citations reference validated evidence. */
+export const researchResults = pgTable(
+  'research_results',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    researchSessionId: uuid('research_session_id').notNull().references(() => researchSessions.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull().default(1),
+    executiveSummary: text('executive_summary'),
+    findings: jsonb('findings').$type<Array<{ claim: string; confidence: number; status: string; citationIds: string[] }>>(),
+    analysis: text('analysis'),
+    recommendations: text('recommendations'),
+    uncertainties: jsonb('uncertainties').$type<string[]>().default([]),
+    citationIds: jsonb('citation_ids').notNull().$type<string[]>().default([]),
+    partial: boolean('partial').notNull().default(false),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ sessionUnique: unique('research_results_session_version_unique').on(t.researchSessionId, t.version) }),
+);
+
+export type ResearchSession = typeof researchSessions.$inferSelect;
+export type ResearchTask = typeof researchTasks.$inferSelect;
+export type ResearchEvidence = typeof researchEvidence.$inferSelect;
+export type ResearchFinding = typeof researchFindings.$inferSelect;
+export type ResearchConflict = typeof researchConflicts.$inferSelect;
+export type ResearchResult = typeof researchResults.$inferSelect;

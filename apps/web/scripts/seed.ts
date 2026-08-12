@@ -412,11 +412,26 @@ async function seedPlans(db: DB) {
     await db.insert(voiceProfiles).values(v).onConflictDoNothing();
   }
 
+  // Phase 15 — advanced research entitlements per tier. FREE has none.
+  const rs: Record<string, { on: boolean; deep: boolean; runs: number | null; tasks: number | null; sources: number | null; parallel: number | null; cost: number | null }> = {
+    FREE: { on: false, deep: false, runs: 0, tasks: 0, sources: 0, parallel: 0, cost: 0 },
+    PRO: { on: true, deep: false, runs: 20, tasks: 4, sources: 16, parallel: 3, cost: 2 },
+    BUSINESS: { on: true, deep: true, runs: 200, tasks: 6, sources: 30, parallel: 3, cost: 10 },
+    ENTERPRISE: { on: true, deep: true, runs: null, tasks: 8, sources: 40, parallel: 4, cost: null },
+    ADMIN: { on: true, deep: true, runs: null, tasks: 8, sources: 40, parallel: 4, cost: null },
+  };
+  for (const [slug, r] of Object.entries(rs)) {
+    await db
+      .update(plans)
+      .set({ advancedResearchEnabled: r.on, deepResearchEnabled: r.deep, researchRunsPerMonth: r.runs, maxResearchTasks: r.tasks, maxSourcesPerResearch: r.sources, maxParallelAgents: r.parallel, maxResearchCost: r.cost })
+      .where(eq(plans.slug, slug));
+  }
+
   // Give the seeded admin the ADMIN plan (entitlement via plan, not a bypass).
   const adminEmail = process.env.SEED_ADMIN_EMAIL || 'admin@biina.local';
   await db.update(users).set({ plan: 'ADMIN' }).where(eq(users.email, adminEmail));
 
-  console.log('✓ plans seeded (FREE/PRO/BUSINESS/ENTERPRISE/ADMIN) + RAG/web/connector/agent/workflow/memory/multimodal entitlements + voices');
+  console.log('✓ plans seeded (FREE/PRO/BUSINESS/ENTERPRISE/ADMIN) + RAG/web/connector/agent/workflow/memory/multimodal/research entitlements + voices');
 }
 
 /**

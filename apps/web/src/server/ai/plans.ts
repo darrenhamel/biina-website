@@ -79,6 +79,13 @@ const FALLBACK_FREE: Plan = {
   voiceModeEnabled: false,
   voiceMinutesPerMonth: null,
   mediaStorageBytesLimit: null,
+  advancedResearchEnabled: false,
+  deepResearchEnabled: false,
+  researchRunsPerMonth: null,
+  maxResearchTasks: null,
+  maxSourcesPerResearch: null,
+  maxParallelAgents: null,
+  maxResearchCost: null,
   priorityClass: 100,
   updatedAt: new Date(0),
 };

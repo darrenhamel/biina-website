@@ -17,6 +17,7 @@ export type NavKey =
   | 'templates'
   | 'projects'
   | 'agents'
+  | 'research'
   | 'automations'
   | 'files';
 
@@ -37,6 +38,7 @@ export const primaryNav: NavItem[] = [
   { key: 'templates', path: 'templates', labelKey: 'templates', icon: 'templates', enabled: false },
   { key: 'projects', path: 'projects', labelKey: 'projects', icon: 'projects', enabled: false },
   { key: 'agents', path: 'agent', labelKey: 'agent', icon: 'agents', enabled: true },
+  { key: 'research', path: 'research', labelKey: 'research', icon: 'research', enabled: true },
   { key: 'automations', path: 'automations', labelKey: 'automations', icon: 'clock', enabled: true },
   { key: 'files', path: 'files', labelKey: 'files', icon: 'files', enabled: false },
 ];

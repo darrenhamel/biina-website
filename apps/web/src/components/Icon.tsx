@@ -15,6 +15,13 @@ const paths: Record<string, JSX.Element> = {
       <path d="m21 21-4.3-4.3" />
     </>
   ),
+  research: (
+    <>
+      <circle cx="11" cy="11" r="6" />
+      <path d="m20.5 20.5-4-4" />
+      <path d="M11 8v6M8 11h6" />
+    </>
+  ),
   templates: (
     <>
       <rect x="3" y="3" width="7" height="7" rx="1.5" />
