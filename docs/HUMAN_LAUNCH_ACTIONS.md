@@ -70,3 +70,42 @@ email provider + wired adapter (LB-02), and — only if Files/RAG ship ON — du
 (LB-03) + a real embedder (LB-04). Then wire monitoring/backups (LB-08/LB-09) and set the
 conservative flags. Confirm the whole set with `npm run validate:production` (0 blockers) and
 `/api/health`. See [`CURRENT_LAUNCH_STATUS.md`](./CURRENT_LAUNCH_STATUS.md) for the gating list.
+
+---
+
+## Provider activation status tracker
+
+The concrete provider stack chosen for the invite-only beta and the live status of each
+piece. Every row is a **HUMAN ACTION** — creating the paid account, accepting terms, adding
+a payment method, provisioning the resource, and copying credentials into the secret manager
+are steps automation must not take. Fill **Owner** with a real name and advance **Status** as
+each provider comes online. When every row reaches **VALIDATED**, the beta stack is ready to
+deploy per [`HETZNER_DEPLOYMENT.md`](./HETZNER_DEPLOYMENT.md).
+
+**Status values (in order):**
+`NOT STARTED` → `ACCOUNT CREATED` → `CREDENTIALS AVAILABLE` → `CONFIGURED` (value in the
+env file, `validate:production` sees it) → `VALIDATED` (proven end-to-end via
+`/api/health` + `smoke:production` / an exercised flow).
+
+Per-provider setup docs (the "how"):
+[`SUPABASE_PRODUCTION_SETUP.md`](./SUPABASE_PRODUCTION_SETUP.md) ·
+[`SUPABASE_STORAGE_SETUP.md`](./SUPABASE_STORAGE_SETUP.md) ·
+[`RUNPOD_BETA_ACTIVATION.md`](./RUNPOD_BETA_ACTIVATION.md) ·
+[`EMBEDDINGS_BETA_ACTIVATION.md`](./EMBEDDINGS_BETA_ACTIVATION.md) ·
+[`RESEND_PRODUCTION_SETUP.md`](./RESEND_PRODUCTION_SETUP.md) ·
+[`CLOUDFLARE_PRODUCTION_SETUP.md`](./CLOUDFLARE_PRODUCTION_SETUP.md).
+Deployment + secrets + monitoring:
+[`HETZNER_DEPLOYMENT.md`](./HETZNER_DEPLOYMENT.md) ·
+[`PRODUCTION_SECRET_CHECKLIST.md`](./PRODUCTION_SECRET_CHECKLIST.md) ·
+[`BETA_MONITORING_SETUP.md`](./BETA_MONITORING_SETUP.md).
+
+| Provider | Component | Status | Owner | Notes |
+|---|---|---|---|---|
+| **Supabase** | Database (Postgres 16 + pgvector) | NOT STARTED | `<assign>` | Provides `DATABASE_URL`; enable automated snapshots/PITR. See [`SUPABASE_PRODUCTION_SETUP.md`](./SUPABASE_PRODUCTION_SETUP.md). |
+| **Supabase** | Storage (S3 object storage) | NOT STARTED | `<assign>` | Private bucket via S3 adapter (`FILE_STORAGE_PROVIDER=s3`); provides `S3_*`. See [`SUPABASE_STORAGE_SETUP.md`](./SUPABASE_STORAGE_SETUP.md). |
+| **RunPod** | Inference (OpenAI-compatible) | NOT STARTED | `<assign>` | `AI_DEFAULT_PROVIDER=openai-compatible`; provides base URL + `OPENAI_COMPATIBLE_API_KEY`; set a spend cap. See [`RUNPOD_BETA_ACTIVATION.md`](./RUNPOD_BETA_ACTIVATION.md). |
+| **RunPod / endpoint** | Embeddings | NOT STARTED | `<assign>` | Real embedder for RAG/memory; provides `EMBEDDING_*` (falls back to the inference creds if same endpoint). See [`EMBEDDINGS_BETA_ACTIVATION.md`](./EMBEDDINGS_BETA_ACTIVATION.md). |
+| **Resend** | Email | NOT STARTED | `<assign>` | Verified sender domain (SPF/DKIM/DMARC); provides `RESEND_API_KEY`. See [`RESEND_PRODUCTION_SETUP.md`](./RESEND_PRODUCTION_SETUP.md). |
+| **Cloudflare** | Edge / DNS / TLS / WAF | NOT STARTED | `<assign>` | Fronts the box; DNS change is HUMAN ACTION. See [`CLOUDFLARE_PRODUCTION_SETUP.md`](./CLOUDFLARE_PRODUCTION_SETUP.md). |
+| **Hetzner** | Compute (single VPS) | NOT STARTED | `<assign>` | One small VPS; OS hardening + Docker. See [`HETZNER_DEPLOYMENT.md`](./HETZNER_DEPLOYMENT.md). |
+| **Monitoring** | Uptime / errors / AI cost alarm / log sink | NOT STARTED | `<assign>` | External `/api/health` probe + budget alarm + log retention; set alert destinations. See [`BETA_MONITORING_SETUP.md`](./BETA_MONITORING_SETUP.md). |
