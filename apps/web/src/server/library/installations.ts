@@ -8,6 +8,7 @@ import { getAgentTool } from '@/server/agent/tool-catalog';
 import { getExperienceProfile } from '@/config/experience-profiles';
 import { libraryEnabled, libraryInstallationEnabled, itemSuspendedByPlatform, HARD_MAX_INSTALLED_AGENTS, HARD_MAX_INSTALLED_WORKFLOWS } from './config';
 import { canViewItem, getOrgLibraryPolicy, orgApprovedItemIds, type LibraryViewer } from './access';
+import { resolveOrgGovernance } from '@/server/enterprise/deployment';
 import { currentPublishedVersion } from './versions';
 import { installedTypeFor, isExecutableType, RISK_ORDER, type LibraryItemType, type RiskLevel } from './types';
 
@@ -99,6 +100,17 @@ async function assertInstallAllowed(viewer: LibraryViewer, item: LibraryItem, ve
 
   // Org curation: APPROVED_ONLY + write-capable restrictions + public marketplace off.
   if (viewer.activeOrganizationId) {
+    // Phase 17 — the enterprise security policy's marketplace mode composes on top of
+    // Phase 16 library curation (most restrictive wins). DISABLED blocks all installs;
+    // ORGANIZATION_ONLY blocks non-org items; CURATED_ONLY blocks unapproved non-BIINA.
+    const gov = await resolveOrgGovernance(viewer.activeOrganizationId);
+    const mode = gov.policy.marketplaceMode;
+    if (mode === 'DISABLED') throw new AppError(403, 'Your organization has disabled the library.', 'org_marketplace_disabled');
+    if (mode === 'ORGANIZATION_ONLY' && item.publisherOrganizationId !== viewer.activeOrganizationId) throw new AppError(403, 'Your organization only allows its own library items.', 'org_only');
+    if (mode === 'CURATED_ONLY' && item.publisherType !== 'BIINA' && item.publisherOrganizationId !== viewer.activeOrganizationId) {
+      const approved = await orgApprovedItemIds(viewer.activeOrganizationId);
+      if (!approved.has(item.id)) throw new AppError(403, 'Only curated/approved items may be installed.', 'org_curated_only');
+    }
     const policy = await getOrgLibraryPolicy(viewer.activeOrganizationId);
     if (item.visibility === 'PUBLIC' && !policy.publicLibraryEnabled) throw new AppError(403, 'Your organization has disabled the public library.', 'org_public_disabled');
     if (!policy.writeCapableAllowed && RISK_ORDER[version.riskLevel as RiskLevel] >= RISK_ORDER.WRITE_CAPABLE) {

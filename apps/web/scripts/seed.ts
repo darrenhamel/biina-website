@@ -26,6 +26,7 @@ import {
   billingConfig,
   connectorDefinitions,
   voiceProfiles,
+  deploymentProfiles,
 } from '../src/server/db/schema';
 import { DEFAULT_VOICES } from '../src/server/media/voices';
 
@@ -441,6 +442,32 @@ async function seedPlans(db: DB) {
       .update(plans)
       .set({ libraryEnabled: l.on, agentLibraryEnabled: l.agents, workflowLibraryEnabled: l.workflows, organizationLibraryEnabled: l.org, publicLibraryEnabled: l.pub, maxInstalledAgents: l.maxAgents, maxInstalledWorkflows: l.maxWorkflows })
       .where(eq(plans.slug, slug));
+  }
+
+  // Phase 17 — enterprise / sovereign entitlements per tier. Consumer tiers off.
+  const ent: Record<string, { on: boolean; sso: boolean; scim: boolean; dedicated: boolean; residency: boolean; auditExport: boolean; customRoles: boolean }> = {
+    FREE: { on: false, sso: false, scim: false, dedicated: false, residency: false, auditExport: false, customRoles: false },
+    PRO: { on: false, sso: false, scim: false, dedicated: false, residency: false, auditExport: false, customRoles: false },
+    BUSINESS: { on: true, sso: true, scim: false, dedicated: false, residency: false, auditExport: true, customRoles: true },
+    ENTERPRISE: { on: true, sso: true, scim: true, dedicated: true, residency: true, auditExport: true, customRoles: true },
+    ADMIN: { on: true, sso: true, scim: true, dedicated: true, residency: true, auditExport: true, customRoles: true },
+  };
+  for (const [slug, e] of Object.entries(ent)) {
+    await db
+      .update(plans)
+      .set({ enterpriseFeaturesEnabled: e.on, ssoEnabled: e.sso, scimEnabled: e.scim, dedicatedProviderAllowed: e.dedicated, dataResidencyControls: e.residency, auditExportEnabled: e.auditExport, customRolesEnabled: e.customRoles })
+      .where(eq(plans.slug, slug));
+  }
+
+  // Phase 17 — seed baseline deployment profiles (idempotent). A privileged sovereign
+  // profile is platform-managed and only assignable by a platform admin.
+  const profileSeeds = [
+    { slug: 'shared-saas', displayName: 'Shared SaaS', deploymentType: 'SHARED_SAAS' as const, region: 'OTHER', privileged: false, externalAIAllowed: true, externalWebSearchAllowed: true, externalConnectorsAllowed: true, allowedProviderRegions: [] as string[] },
+    { slug: 'uae-sovereign', displayName: 'UAE Sovereign (readiness)', deploymentType: 'SOVEREIGN' as const, region: 'UAE', privileged: true, externalAIAllowed: false, externalWebSearchAllowed: false, externalConnectorsAllowed: false, allowedProviderRegions: ['UAE'], privateStorageRequired: true, privateVectorStoreRequired: true, jurisdictionLabel: 'United Arab Emirates' },
+  ];
+  for (const p of profileSeeds) {
+    const [existing] = await db.select({ id: deploymentProfiles.id }).from(deploymentProfiles).where(eq(deploymentProfiles.slug, p.slug)).limit(1);
+    if (!existing) await db.insert(deploymentProfiles).values(p);
   }
 
   // Give the seeded admin the ADMIN plan (entitlement via plan, not a bypass).

@@ -69,6 +69,7 @@ export default async function AdminPage({ params }: { params: { locale: string }
         <div className="mt-4 grid gap-3">
           <AdminLink href={`/${locale}/app/admin/users`} icon="user" title={dict.admin.users} sub={dict.admin.usersSub} />
           <AdminLink href={`/${locale}/app/admin/orgs`} icon="templates" title={dict.admin.orgs} sub={dict.admin.orgsSub} />
+          <AdminLink href={`/${locale}/app/admin/enterprise`} icon="shield" title={dict.adminEnterprise.title} sub={dict.adminEnterprise.subtitle} />
           <AdminLink href={`/${locale}/app/admin/ai`} icon="spark" title={dict.admin.aiControl} sub={dict.admin.aiControlSub} />
           <AdminLink href={`/${locale}/app/admin/rag`} icon="files" title={dict.adminRag.title} sub={dict.adminRag.subtitle} />
           <AdminLink href={`/${locale}/app/admin/web`} icon="globe" title={dict.adminWeb.title} sub={dict.adminWeb.subtitle} />

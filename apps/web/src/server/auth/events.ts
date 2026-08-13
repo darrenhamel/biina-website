@@ -136,7 +136,31 @@ export type SecurityEventType =
   | 'library.uninstalled'
   | 'library.org_curation_changed'
   | 'library.org_policy_changed'
-  | 'library.validation_blocked';
+  | 'library.validation_blocked'
+  // Phase 17 — enterprise / government / sovereign.
+  | 'sso.login'
+  | 'sso.rejected'
+  | 'domain.claimed'
+  | 'domain.verified'
+  | 'domain.verification_failed'
+  | 'domain.revoked'
+  | 'scim.token_created'
+  | 'scim.user_provisioned'
+  | 'scim.user_deactivated'
+  | 'scim.group_provisioned'
+  | 'enterprise.idp_changed'
+  | 'enterprise.security_policy_changed'
+  | 'enterprise.residency_changed'
+  | 'enterprise.retention_changed'
+  | 'enterprise.role_changed'
+  | 'enterprise.role_assigned'
+  | 'enterprise.deployment_assigned'
+  | 'enterprise.provider_created'
+  | 'enterprise.provider_changed'
+  | 'enterprise.service_account_created'
+  | 'enterprise.audit_exported'
+  | 'enterprise.org_archived'
+  | 'enterprise.high_risk_change';
 
 export async function logSecurityEvent(entry: {
   event: SecurityEventType;

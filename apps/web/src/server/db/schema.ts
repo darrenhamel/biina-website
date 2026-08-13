@@ -5,6 +5,7 @@ import {
   timestamp,
   varchar,
   index,
+  uniqueIndex,
   pgEnum,
   jsonb,
   boolean,
@@ -13,7 +14,7 @@ import {
   real,
   unique,
 } from 'drizzle-orm/pg-core';
-import { relations } from 'drizzle-orm';
+import { relations, sql } from 'drizzle-orm';
 
 /**
  * BIINA.ai — Phase 1 schema.
@@ -53,6 +54,11 @@ export const users = pgTable(
     suspendedReason: varchar('suspended_reason', { length: 280 }),
     suspendedBy: uuid('suspended_by'),
     suspendedAt: timestamp('suspended_at', { withTimezone: true }),
+    // Phase 17 — account ownership model. A PERSONAL account is owned by the user;
+    // an ORGANIZATION_MANAGED account is provisioned/controlled by an enterprise IdP.
+    // Ownership NEVER changes silently — this is set explicitly by managed provisioning.
+    accountType: varchar('account_type', { length: 24 }).notNull().default('PERSONAL'),
+    managedByOrganizationId: uuid('managed_by_organization_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -212,6 +218,15 @@ export const aiProviders = pgTable('ai_providers', {
   apiKeyEnvRef: varchar('api_key_env_ref', { length: 96 }),
   // Optional future data-residency attributes (readiness only).
   region: varchar('region', { length: 32 }),
+  // Phase 17 — provider ownership + external/private classification for enterprise
+  // routing. PLATFORM providers are shared; ORGANIZATION providers are private to one
+  // tenant (never selectable by another org); DEPLOYMENT providers belong to a
+  // deployment profile. `isExternal` marks a provider that egresses to the public
+  // internet / an external vendor (blocked when an org disables external AI).
+  ownerType: varchar('owner_type', { length: 16 }).notNull().default('PLATFORM'),
+  ownerOrganizationId: uuid('owner_organization_id'),
+  isExternal: boolean('is_external').notNull().default(true),
+  privateEndpoint: boolean('private_endpoint').notNull().default(false),
   supportsStreaming: boolean('supports_streaming').notNull().default(true),
   supportsChat: boolean('supports_chat').notNull().default(true),
   supportsTools: boolean('supports_tools').notNull().default(false),
@@ -436,6 +451,16 @@ export const plans = pgTable('plans', {
   publicLibraryEnabled: boolean('public_library_enabled').notNull().default(false),
   maxInstalledAgents: integer('max_installed_agents'),
   maxInstalledWorkflows: integer('max_installed_workflows'),
+  // Phase 17 — enterprise / government / sovereign entitlements. Off for consumer tiers.
+  enterpriseFeaturesEnabled: boolean('enterprise_features_enabled').notNull().default(false),
+  ssoEnabled: boolean('sso_enabled').notNull().default(false),
+  scimEnabled: boolean('scim_enabled').notNull().default(false),
+  dedicatedProviderAllowed: boolean('dedicated_provider_allowed').notNull().default(false),
+  dataResidencyControls: boolean('data_residency_controls').notNull().default(false),
+  auditExportEnabled: boolean('audit_export_enabled').notNull().default(false),
+  customRolesEnabled: boolean('custom_roles_enabled').notNull().default(false),
+  maxOrganizationGroups: integer('max_organization_groups'),
+  maxCustomRoles: integer('max_custom_roles'),
   // Routing priority class (lower = higher priority). Readiness for priority routing.
   priorityClass: integer('priority_class').notNull().default(100),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -540,7 +565,7 @@ export const aiModelsRelations = relations(aiModels, ({ one }) => ({
 // are DISTINCT authorities and never share a column. Tokens are stored HASHED.
 // ==========================================================================
 
-export const orgStatus = pgEnum('org_status', ['ACTIVE', 'SUSPENDED']);
+export const orgStatus = pgEnum('org_status', ['ACTIVE', 'SUSPENDED', 'ARCHIVED']);
 export const orgRole = pgEnum('org_role', ['OWNER', 'ADMIN', 'MEMBER']);
 export const inviteStatus = pgEnum('invite_status', ['PENDING', 'ACCEPTED', 'EXPIRED', 'REVOKED']);
 export const emailTokenType = pgEnum('email_token_type', ['verify', 'reset']);
@@ -598,6 +623,10 @@ export const organizations = pgTable(
     planSlug: varchar('plan_slug', { length: 32 }),
     // Seat/allowance readiness (not enforced yet).
     maxSeats: integer('max_seats'),
+    // Phase 17 — enterprise deployment binding. A privileged deployment profile can
+    // only be assigned by a PLATFORM admin (never self-assigned by an org admin).
+    deploymentProfileId: uuid('deployment_profile_id'),
+    archivedAt: timestamp('archived_at', { withTimezone: true }),
     suspendedReason: varchar('suspended_reason', { length: 280 }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -620,6 +649,12 @@ export const organizationMembers = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     role: orgRole('role').notNull().default('MEMBER'),
+    // Phase 17 — optional custom enterprise role (falls back to the base `role`).
+    roleDefinitionId: uuid('role_definition_id'),
+    // Provisioned/managed by SCIM (enterprise IdP). Deactivation revokes org access.
+    managedByScim: boolean('managed_by_scim').notNull().default(false),
+    scimExternalId: varchar('scim_external_id', { length: 128 }),
+    active: boolean('active').notNull().default(true),
     joinedAt: timestamp('joined_at', { withTimezone: true }).notNull().defaultNow(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -2259,3 +2294,282 @@ export type LibraryFeedbackRow = typeof libraryFeedback.$inferSelect;
 export type PublisherProfile = typeof publisherProfiles.$inferSelect;
 export type LibraryOrgSettings = typeof libraryOrgSettings.$inferSelect;
 export type LibraryOrgCuration = typeof libraryOrgCuration.$inferSelect;
+
+// ==========================================================================
+// Phase 17 — ENTERPRISE / GOVERNMENT / SOVEREIGN deployment control layer.
+//
+// The same product runs as shared SaaS or a dedicated/sovereign tenant via
+// CONFIGURATION + policy, not forks. New controls only ever TIGHTEN behavior:
+// effective policy resolves platform → deployment profile → organization → group/
+// role → user, most-restrictive-wins. Enterprise identity (OIDC/SAML/SCIM) is
+// provider-independent; secrets live in the secret store (env refs only here).
+// A privileged/sovereign deployment profile is assigned by a PLATFORM admin, never
+// self-assigned. Private (organization/deployment) providers are never selectable by
+// another tenant. Selecting a "Government" persona does NOT make a deployment
+// sovereign — only an assigned deployment profile + real infrastructure does.
+// ==========================================================================
+
+export const deploymentType = pgEnum('deployment_type', ['SHARED_SAAS', 'DEDICATED_TENANT', 'PRIVATE_CLOUD', 'SOVEREIGN', 'ON_PREMISE_READY']);
+export const tenantIsolationMode = pgEnum('tenant_isolation_mode', ['SHARED_DATABASE_TENANT_ISOLATION', 'DEDICATED_DATABASE']);
+export const identityProviderType = pgEnum('identity_provider_type', ['OIDC', 'SAML']);
+export const domainStatus = pgEnum('domain_status', ['PENDING', 'VERIFIED', 'FAILED', 'REVOKED']);
+export const auditLevel = pgEnum('audit_level', ['MINIMAL', 'STANDARD', 'DETAILED']);
+export const dataClassification = pgEnum('data_classification', ['PUBLIC', 'INTERNAL', 'CONFIDENTIAL', 'RESTRICTED']);
+export const serviceAccountStatus = pgEnum('service_account_status', ['ACTIVE', 'DISABLED', 'EXPIRED']);
+
+/** A deployment/security profile. PLATFORM-managed; assigned to orgs by platform admins. */
+export const deploymentProfiles = pgTable('deployment_profiles', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  slug: varchar('slug', { length: 64 }).notNull().unique(),
+  displayName: varchar('display_name', { length: 120 }).notNull(),
+  deploymentType: deploymentType('deployment_type').notNull().default('SHARED_SAAS'),
+  region: varchar('region', { length: 32 }).notNull().default('OTHER'),
+  jurisdictionLabel: varchar('jurisdiction_label', { length: 120 }),
+  tenantIsolationMode: tenantIsolationMode('tenant_isolation_mode').notNull().default('SHARED_DATABASE_TENANT_ISOLATION'),
+  // Trusted infrastructure constraints (data, not secrets).
+  allowedProviderRegions: jsonb('allowed_provider_regions').notNull().$type<string[]>().default([]),
+  allowedModelProviders: jsonb('allowed_model_providers').notNull().$type<string[]>().default([]),
+  externalAIAllowed: boolean('external_ai_allowed').notNull().default(true),
+  externalWebSearchAllowed: boolean('external_web_search_allowed').notNull().default(true),
+  externalConnectorsAllowed: boolean('external_connectors_allowed').notNull().default(true),
+  privateStorageRequired: boolean('private_storage_required').notNull().default(false),
+  privateVectorStoreRequired: boolean('private_vector_store_required').notNull().default(false),
+  auditLevel: auditLevel('audit_level').notNull().default('STANDARD'),
+  retentionPolicyId: uuid('retention_policy_id'),
+  // A privileged profile (SOVEREIGN/PRIVATE_CLOUD/DEDICATED) is platform-restricted.
+  privileged: boolean('privileged').notNull().default(false),
+  enabled: boolean('enabled').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** An enterprise identity provider bound to ONE organization. Secrets via env/secret refs. */
+export const organizationIdentityProviders = pgTable(
+  'organization_identity_providers',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+    type: identityProviderType('type').notNull(),
+    displayName: varchar('display_name', { length: 120 }).notNull(),
+    enabled: boolean('enabled').notNull().default(false),
+    // OIDC.
+    issuer: varchar('issuer', { length: 400 }),
+    clientIdRef: varchar('client_id_ref', { length: 96 }), // env/secret reference, NOT the value
+    clientSecretRef: varchar('client_secret_ref', { length: 96 }),
+    // SAML (verified via a maintained library, not hand-rolled crypto).
+    metadataRef: varchar('metadata_ref', { length: 96 }),
+    spEntityId: varchar('sp_entity_id', { length: 400 }),
+    acsUrl: varchar('acs_url', { length: 400 }),
+    idpCertRef: varchar('idp_cert_ref', { length: 96 }),
+    attributeMappings: jsonb('attribute_mappings').$type<Record<string, string>>().default({}),
+    // Enforcement + binding.
+    enforceSSO: boolean('enforce_sso').notNull().default(false),
+    allowPasswordFallback: boolean('allow_password_fallback').notNull().default(true),
+    domainRestriction: jsonb('domain_restriction').notNull().$type<string[]>().default([]),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ orgIdx: index('org_idp_org_idx').on(t.organizationId) }),
+);
+
+/** A domain claimed + verified by an organization (DNS TXT). Token stored HASHED. */
+export const verifiedDomains = pgTable(
+  'verified_domains',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+    domain: varchar('domain', { length: 253 }).notNull(),
+    status: domainStatus('status').notNull().default('PENDING'),
+    verificationMethod: varchar('verification_method', { length: 24 }).notNull().default('DNS_TXT'),
+    verificationTokenHash: varchar('verification_token_hash', { length: 64 }).notNull(),
+    verifiedAt: timestamp('verified_at', { withTimezone: true }),
+    createdByUserId: uuid('created_by_user_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Only ONE organization may hold a given domain in a non-revoked state.
+    domainActiveUniq: uniqueIndex('verified_domains_active_uniq').on(t.domain).where(sql`status <> 'REVOKED'`),
+    orgIdx: index('verified_domains_org_idx').on(t.organizationId),
+  }),
+);
+
+/** SCIM provisioning config — one per organization. Bearer token stored HASHED. */
+export const scimConfigurations = pgTable('scim_configurations', {
+  organizationId: uuid('organization_id').primaryKey().references(() => organizations.id, { onDelete: 'cascade' }),
+  enabled: boolean('enabled').notNull().default(false),
+  tokenHash: varchar('token_hash', { length: 64 }),
+  tokenPrefix: varchar('token_prefix', { length: 16 }),
+  tokenLastFour: varchar('token_last_four', { length: 8 }),
+  defaultRole: orgRole('default_role').notNull().default('MEMBER'),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+  createdByUserId: uuid('created_by_user_id'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Organization groups (department/team/role group). May be SCIM-managed. */
+export const organizationGroups = pgTable(
+  'organization_groups',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 160 }).notNull(),
+    description: varchar('description', { length: 400 }),
+    groupType: varchar('group_type', { length: 24 }).notNull().default('TEAM'),
+    scimExternalId: varchar('scim_external_id', { length: 128 }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ orgNameUniq: unique('org_groups_org_name_uniq').on(t.organizationId, t.name), orgIdx: index('org_groups_org_idx').on(t.organizationId) }),
+);
+
+export const organizationGroupMembers = pgTable(
+  'organization_group_members',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    groupId: uuid('group_id').notNull().references(() => organizationGroups.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ groupUserUniq: unique('org_group_members_uniq').on(t.groupId, t.userId), groupIdx: index('org_group_members_group_idx').on(t.groupId) }),
+);
+
+/** A custom or built-in organization role definition (permission set). */
+export const organizationRoleDefinitions = pgTable(
+  'organization_role_definitions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+    slug: varchar('slug', { length: 48 }).notNull(),
+    name: varchar('name', { length: 120 }).notNull(),
+    description: varchar('description', { length: 400 }),
+    // Validated against the enterprise permission vocabulary (server-side).
+    permissions: jsonb('permissions').notNull().$type<string[]>().default([]),
+    systemRole: boolean('system_role').notNull().default(false),
+    enabled: boolean('enabled').notNull().default(true),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ orgSlugUniq: unique('org_role_defs_org_slug_uniq').on(t.organizationId, t.slug), orgIdx: index('org_role_defs_org_idx').on(t.organizationId) }),
+);
+
+/** Centralized organization security policy — one row per org. All fields TIGHTEN. */
+export const organizationSecurityPolicies = pgTable('organization_security_policies', {
+  organizationId: uuid('organization_id').primaryKey().references(() => organizations.id, { onDelete: 'cascade' }),
+  // AI providers / models.
+  allowedAIProviders: jsonb('allowed_ai_providers').notNull().$type<string[]>().default([]), // empty = all
+  allowedModelProfiles: jsonb('allowed_model_profiles').notNull().$type<string[]>().default([]),
+  externalAIAllowed: boolean('external_ai_allowed').notNull().default(true),
+  // Web search: DISABLED | PUBLIC_ONLY | APPROVED_DOMAINS | STANDARD.
+  webSearchMode: varchar('web_search_mode', { length: 20 }).notNull().default('STANDARD'),
+  approvedResearchDomains: jsonb('approved_research_domains').notNull().$type<string[]>().default([]),
+  // Connectors.
+  personalConnectorsAllowed: boolean('personal_connectors_allowed').notNull().default(true),
+  organizationConnectorsRequired: boolean('organization_connectors_required').notNull().default(false),
+  allowedConnectors: jsonb('allowed_connectors').notNull().$type<string[]>().default([]),
+  // Agents / workflows.
+  agentsEnabled: boolean('agents_enabled').notNull().default(true),
+  externalWritesEnabled: boolean('external_writes_enabled').notNull().default(true),
+  standingAuthorizationsAllowed: boolean('standing_authorizations_allowed').notNull().default(true),
+  maxAgentSteps: integer('max_agent_steps'),
+  scheduledAutomationsEnabled: boolean('scheduled_automations_enabled').notNull().default(true),
+  scheduledWritesEnabled: boolean('scheduled_writes_enabled').notNull().default(true),
+  // Other capability governance.
+  memoryEnabled: boolean('memory_enabled').notNull().default(true),
+  multimodalEnabled: boolean('multimodal_enabled').notNull().default(true),
+  researchEnabled: boolean('research_enabled').notNull().default(true),
+  researchExternalWebAllowed: boolean('research_external_web_allowed').notNull().default(true),
+  researchMaxDepth: varchar('research_max_depth', { length: 12 }),
+  // Marketplace: PUBLIC_ALLOWED | CURATED_ONLY | ORGANIZATION_ONLY | DISABLED.
+  marketplaceMode: varchar('marketplace_mode', { length: 20 }).notNull().default('PUBLIC_ALLOWED'),
+  dataExportAllowed: boolean('data_export_allowed').notNull().default(true),
+  defaultDataClassification: dataClassification('default_data_classification').notNull().default('INTERNAL'),
+  // Session / access.
+  sessionMaxMinutes: integer('session_max_minutes'),
+  idleTimeoutMinutes: integer('idle_timeout_minutes'),
+  ssoReauthMinutes: integer('sso_reauth_minutes'),
+  ipAllowlist: jsonb('ip_allowlist').notNull().$type<string[]>().default([]),
+  mfaRequired: boolean('mfa_required').notNull().default(false),
+  version: integer('version').notNull().default(1),
+  updatedByUserId: uuid('updated_by_user_id'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Data-residency policy (platform template when organizationId is null). */
+export const dataResidencyPolicies = pgTable('data_residency_policies', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+  name: varchar('name', { length: 120 }).notNull(),
+  allowedRegions: jsonb('allowed_regions').notNull().$type<string[]>().default([]),
+  requiredRegions: jsonb('required_regions').notNull().$type<string[]>().default([]),
+  storageRegion: varchar('storage_region', { length: 32 }),
+  vectorRegion: varchar('vector_region', { length: 32 }),
+  modelInferenceRegion: varchar('model_inference_region', { length: 32 }),
+  externalTransferAllowed: boolean('external_transfer_allowed').notNull().default(true),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Retention policy (platform template when organizationId is null). */
+export const retentionPolicies = pgTable('retention_policies', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  organizationId: uuid('organization_id').references(() => organizations.id, { onDelete: 'cascade' }),
+  name: varchar('name', { length: 120 }).notNull(),
+  conversationRetentionDays: integer('conversation_retention_days'),
+  fileRetentionDays: integer('file_retention_days'),
+  auditRetentionDays: integer('audit_retention_days'),
+  memoryRetentionDays: integer('memory_retention_days'),
+  researchRetentionDays: integer('research_retention_days'),
+  workflowRunRetentionDays: integer('workflow_run_retention_days'),
+  deletionMode: varchar('deletion_mode', { length: 16 }).notNull().default('SOFT_DELETE'),
+  legalHoldEnabled: boolean('legal_hold_enabled').notNull().default(false),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Machine-to-machine service account (scoped, expiring, audited). Token HASHED. */
+export const serviceAccounts = pgTable(
+  'service_accounts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+    name: varchar('name', { length: 120 }).notNull(),
+    tokenHash: varchar('token_hash', { length: 64 }),
+    tokenPrefix: varchar('token_prefix', { length: 16 }),
+    scopes: jsonb('scopes').notNull().$type<string[]>().default([]),
+    status: serviceAccountStatus('status').notNull().default('DISABLED'),
+    expiresAt: timestamp('expires_at', { withTimezone: true }),
+    lastUsedAt: timestamp('last_used_at', { withTimezone: true }),
+    createdByUserId: uuid('created_by_user_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ orgIdx: index('service_accounts_org_idx').on(t.organizationId) }),
+);
+
+/** Immutable configuration/policy snapshots for change management + audit evidence. */
+export const organizationConfigSnapshots = pgTable(
+  'organization_config_snapshots',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    organizationId: uuid('organization_id').notNull().references(() => organizations.id, { onDelete: 'cascade' }),
+    kind: varchar('kind', { length: 32 }).notNull(), // 'security_policy' | 'residency' | 'retention' | ...
+    snapshot: jsonb('snapshot').notNull(), // no secrets
+    version: integer('version').notNull().default(1),
+    createdByUserId: uuid('created_by_user_id'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({ orgKindIdx: index('org_config_snapshots_org_kind_idx').on(t.organizationId, t.kind) }),
+);
+
+export type DeploymentProfile = typeof deploymentProfiles.$inferSelect;
+export type OrganizationIdentityProvider = typeof organizationIdentityProviders.$inferSelect;
+export type VerifiedDomain = typeof verifiedDomains.$inferSelect;
+export type ScimConfiguration = typeof scimConfigurations.$inferSelect;
+export type OrganizationGroup = typeof organizationGroups.$inferSelect;
+export type OrganizationGroupMember = typeof organizationGroupMembers.$inferSelect;
+export type OrganizationRoleDefinition = typeof organizationRoleDefinitions.$inferSelect;
+export type OrganizationSecurityPolicy = typeof organizationSecurityPolicies.$inferSelect;
+export type DataResidencyPolicy = typeof dataResidencyPolicies.$inferSelect;
+export type RetentionPolicy = typeof retentionPolicies.$inferSelect;
+export type ServiceAccount = typeof serviceAccounts.$inferSelect;
+export type OrganizationConfigSnapshot = typeof organizationConfigSnapshots.$inferSelect;

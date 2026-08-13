@@ -125,6 +125,18 @@ export function OrgWorkspace({
               onSaved={loadInfo}
             />
           )}
+          {isManager && (
+            <Link
+              href={`/${locale}/app/org/administration`}
+              className="card flex items-center justify-between p-5 transition-colors hover:border-accent"
+            >
+              <span>
+                <span className="block text-sm font-semibold text-ink">{dict.enterprise.title}</span>
+                <span className="mt-0.5 block text-sm text-ink-soft">{dict.enterprise.subtitle}</span>
+              </span>
+              <span className="text-ink-faint ltr:rotate-0 rtl:rotate-180">&rarr;</span>
+            </Link>
+          )}
           <LeaveSection slug={slug} dict={dict} locale={locale} />
         </div>
       </div>

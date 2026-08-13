@@ -3,6 +3,7 @@ import { toGatewayError, type ChatMessage, type ChatChunk } from '@biina/ai-gate
 import { getCurrentUser } from '@/server/auth/session';
 import { isPlatformAdmin } from '@/server/auth/permissions';
 import { resolveOrgContext } from '@/server/org/organizations';
+import { resolveOrgGovernance, routeConstraintsFor } from '@/server/enterprise/deployment';
 import {
   addMessage,
   createConversation,
@@ -201,6 +202,13 @@ export async function POST(req: NextRequest) {
       logger.warn('ai.chat.context_engine_failed', { error: String(err) });
     }
 
+    // Resolve enterprise governance (deployment profile + security policy + residency),
+    // folded most-restrictive across platform → deployment → org. Applied to routing so
+    // a residency/external-AI rule can never be bypassed (and never silently falls back
+    // to a prohibited provider).
+    const governance = await resolveOrgGovernance(orgId);
+    const constraints = routeConstraintsFor(governance);
+
     // Build a validated routing context. Privileged fields (plan, isAdmin, org)
     // come from the authenticated session / verified membership, NOT the body.
     const routeContext: RouteContext = {
@@ -212,6 +220,10 @@ export async function POST(req: NextRequest) {
       requestedModelSlug: model ?? undefined,
       organizationId: orgId,
       organizationRole: orgRole,
+      residency: constraints.residency,
+      externalAIAllowed: constraints.externalAIAllowed,
+      allowedProviderSlugs: constraints.allowedProviderSlugs,
+      allowedModelSlugs: constraints.allowedModelSlugs,
     };
 
     const { requestId, meta, stream } = startAssistantReply({

@@ -517,6 +517,46 @@ and sovereign/government deployment are later phases. See
 [`docs/KIDS_TEENS_EXPERIENCE.md`](./docs/KIDS_TEENS_EXPERIENCE.md), and
 [`docs/ORGANIZATION_LIBRARY.md`](./docs/ORGANIZATION_LIBRARY.md).
 
+**Added (Phase 17):** **an enterprise / government / sovereign deployment control layer** —
+the *same* BIINA.ai product can run as shared SaaS or as a dedicated/sovereign tenant
+**through configuration and policy, not a fork**. Organizations get **provider-independent
+enterprise identity** (OIDC / SAML SSO, both off until configured and both using an
+injectable verifier so a maintained crypto library plugs in at activation — BIINA never
+hand-rolls token/assertion crypto), **SCIM** provisioning (an org-scoped, hashed bearer
+token that can never touch another tenant; deactivating a person stops org access but keeps
+their personal account and data), **DNS-TXT domain verification** (an email domain alone is
+never proof of ownership), and **fine-grained RBAC** with least-privilege built-in roles,
+separation of duties, and no self-escalation. A central **organization security policy**
+resolves **most-restrictive-wins across platform → deployment → organization** — every layer
+can only tighten — and drives **data-residency routing**: requests run only on providers in
+approved regions, and if none comply the request fails with `NO_COMPLIANT_MODEL_AVAILABLE`
+rather than **silently falling back to an external provider**. Organizations can run **private
+/ dedicated models** (tenant-isolated, credentials referenced by env-var name and never
+stored or shown), and admins get **append-only audit** with redacted CSV/JSON export plus
+versioned config snapshots and an explicit confirm for high-risk changes. This is a
+**sovereign-deployment readiness** layer, stated honestly: **no regulatory or government
+certification is claimed**, region tags are configuration and **not** a compliance claim,
+**selecting a Government persona does not make a deployment sovereign**, and a real sovereign
+deployment still requires **in-region infrastructure plus a security and legal/compliance
+review**. Readiness (not yet activated): real SSO/SAML/SCIM crypto libraries, retention
+expiration jobs, legal hold, break-glass login, service accounts, MFA / passkey / IP
+allowlist, dedicated-database isolation, and K8s / IaC packaging. See
+[`docs/ENTERPRISE_ARCHITECTURE.md`](./docs/ENTERPRISE_ARCHITECTURE.md),
+[`docs/ENTERPRISE_IDENTITY.md`](./docs/ENTERPRISE_IDENTITY.md),
+[`docs/OIDC.md`](./docs/OIDC.md), [`docs/SAML.md`](./docs/SAML.md),
+[`docs/SCIM.md`](./docs/SCIM.md),
+[`docs/DOMAIN_VERIFICATION.md`](./docs/DOMAIN_VERIFICATION.md),
+[`docs/ENTERPRISE_RBAC.md`](./docs/ENTERPRISE_RBAC.md),
+[`docs/DATA_RESIDENCY.md`](./docs/DATA_RESIDENCY.md),
+[`docs/PRIVATE_MODELS.md`](./docs/PRIVATE_MODELS.md),
+[`docs/RETENTION.md`](./docs/RETENTION.md),
+[`docs/ENTERPRISE_AUDIT.md`](./docs/ENTERPRISE_AUDIT.md),
+[`docs/SOVEREIGN_DEPLOYMENT.md`](./docs/SOVEREIGN_DEPLOYMENT.md),
+[`docs/PRIVATE_DEPLOYMENT.md`](./docs/PRIVATE_DEPLOYMENT.md),
+[`docs/UAE_DEPLOYMENT_READINESS.md`](./docs/UAE_DEPLOYMENT_READINESS.md),
+[`docs/UAE_DEPLOYMENT_ACTIVATION_CHECKLIST.md`](./docs/UAE_DEPLOYMENT_ACTIVATION_CHECKLIST.md),
+and [`docs/ENTERPRISE_ONBOARDING_CHECKLIST.md`](./docs/ENTERPRISE_ONBOARDING_CHECKLIST.md).
+
 **Deferred:** **real external write actions** (the agent ships write-capable but on
 the mock adapter; real Gmail/Calendar/Slack writes require manual activation),
 **scheduled external writes** (off by default; need a standing authorization **and**

@@ -603,6 +603,71 @@ Legend: ☐ not started · ◐ in progress · ☑ done
   `WORKFLOW_LIBRARY.md`, `LIBRARY_PUBLISHING.md`, `LIBRARY_SECURITY.md`,
   `KIDS_TEENS_EXPERIENCE.md`, `ORGANIZATION_LIBRARY.md`.
 
+## Phase 17 — Enterprise / Government / Sovereign deployment control layer  ☑  *(build prompt — enterprise track)*
+
+- ☑ **Same product via config, not forks** (`server/enterprise/`, schema Phase 17,
+  migration `0015_enterprise.sql`): shared SaaS or a dedicated/sovereign tenant is the same
+  codebase constrained by a **deployment profile** + org security/residency/retention
+  policy. `deployment_type` = SHARED_SAAS / DEDICATED_TENANT / PRIVATE_CLOUD / SOVEREIGN /
+  ON_PREMISE_READY. **A "Government" persona does NOT create sovereignty** — only an
+  assigned deployment profile + real infrastructure + review does.
+- ☑ **Governance fold, most-restrictive-wins** (`security-policy.ts`, `deployment.ts`):
+  `resolveOrgGovernance` is the single entry point → `{ deploymentProfile, policy,
+  residency }`, folded platform → deployment → organization. Booleans AND, enums pick the
+  more restrictive, allowlists NARROW (intersect), ceilings take the min. Every layer only
+  **tightens**. `SOVEREIGN_MODE_ENABLED` flips the platform baseline external-off.
+- ☑ **Residency-aware routing, no silent fallback** (`residency.ts`, `regions.ts`, wired in
+  `ai/routing.ts`): `satisfiesEnterprisePolicy` enforces region residency + external-AI
+  block + **private-provider tenant isolation** (an ORGANIZATION provider is usable only by
+  its owner org) + provider/model allowlists. `selectRoute` throws
+  `NO_COMPLIANT_MODEL_AVAILABLE` when candidates exist but none comply; `selectFallback`
+  never rescues via a prohibited provider. Regions are **config, not a compliance claim**.
+- ☑ **Provider-independent enterprise identity** (`identity.ts`): OIDC/SAML with an
+  **injectable `AssertionVerifier`** (default structural verifier validates issuer/audience/
+  expiry/nonce + **organization binding** but NOT crypto — production registers an
+  openid-client / SAML-library verifier via `setAssertionVerifier`). `authenticateSso` →
+  verify → domain restriction → JIT provision membership **bound to that org only** → normal
+  `createSession`. Never maps a user to another org; personal accounts are linked, never
+  silently converted. Gated by `SAML_ENABLED` (false).
+- ☑ **SCIM 2.0 + domain verification** (`scim.ts`, `domains.ts`): org-scoped **hashed**
+  bearer token (shown once, never cross-tenant), Users/Groups provision/deprovision
+  (deactivation keeps personal data), `/api/scim/v2`; DNS-TXT domain proof (hashed token,
+  one org per non-revoked domain, email domain ≠ ownership). Gated by `SCIM_ENABLED` (false).
+- ☑ **Enterprise RBAC** (`rbac.ts`, `guard.ts`): `<domain>.<action>` vocabulary (14 domains
+  × read/manage), immutable BUILTIN_ROLES with **separation of duties** (billing-admin ≠
+  security/AI; auditor read-only), custom roles validated by `sanitizePermissions` (no
+  arbitrary strings), least privilege, **no self-escalation**, OWNER always full.
+  `requireOrgPermission` refuses inactive members.
+- ☑ **Org security policy, retention, private providers, audit** (`policy-store.ts`,
+  `retention.ts`, `providers.ts`, `audit.ts`, `service-accounts.ts`): versioned +
+  snapshotted policy with high-risk-change confirm (externalAIAllowed/externalWritesEnabled);
+  retention folded with platform minimums (audit ≥ 30d); private providers with env-ref
+  secrets + redacted health + logical model ids (`biina-gov`, never vendor names); org
+  audit query + CSV/JSON export (redacted, append-only); service accounts created DISABLED.
+- ☑ **Schema + plan columns + APIs**: tables deployment_profiles,
+  organization_identity_providers, verified_domains, scim_configurations,
+  organization_groups(+members), organization_role_definitions,
+  organization_security_policies, data_residency_policies, retention_policies,
+  service_accounts, organization_config_snapshots; column adds to ai_providers/organizations/
+  organization_members/users; plan columns (enterprise_features_enabled, sso_enabled,
+  scim_enabled, dedicated_provider_allowed, data_residency_controls, audit_export_enabled,
+  custom_roles_enabled, …). APIs under `api/org/enterprise/**`, `api/scim/v2/**`,
+  `api/admin/enterprise/**`. Flags: `ENTERPRISE_FEATURES_ENABLED` (true), `SAML_ENABLED`
+  (false), `SCIM_ENABLED` (false), `DEDICATED_PROVIDER_SUPPORT_ENABLED` (true),
+  `SOVEREIGN_MODE_ENABLED` (false).
+- **Deliverable:** an enterprise/government/sovereign **control plane** on the existing
+  product — governance fold, residency routing, provider-independent SSO/SCIM/RBAC, org
+  policy + audit + retention, private models. Readiness only: real SSO/SAML/SCIM crypto
+  libraries integrate at activation; sovereign/UAE **deployment requires infrastructure +
+  security/compliance review**; retention expiration jobs, legal hold, break-glass, service
+  accounts, MFA/passkey/IP-allowlist, dedicated-DB, K8s/IaC are readiness. **No regulatory/
+  government certification is claimed, and a persona never creates sovereignty.** Docs:
+  `ENTERPRISE_ARCHITECTURE.md`, `ENTERPRISE_IDENTITY.md`, `OIDC.md`, `SAML.md`, `SCIM.md`,
+  `DOMAIN_VERIFICATION.md`, `ENTERPRISE_RBAC.md`, `DATA_RESIDENCY.md`, `PRIVATE_MODELS.md`,
+  `RETENTION.md`, `ENTERPRISE_AUDIT.md`, `SOVEREIGN_DEPLOYMENT.md`, `PRIVATE_DEPLOYMENT.md`,
+  `UAE_DEPLOYMENT_READINESS.md`, `UAE_DEPLOYMENT_ACTIVATION_CHECKLIST.md`,
+  `ENTERPRISE_ONBOARDING_CHECKLIST.md`.
+
 ## Phase 10 — Pre-launch audit  ☐  *(build prompt 8)*
 
 - ☐ Audit all 24 areas; run typecheck / lint / tests / prod build / migration validation / dep-security.

@@ -459,6 +459,121 @@ export const orgCurationSchema = z
   .object({ libraryItemId: z.string().uuid(), state: z.enum(['RECOMMENDED', 'HIDDEN', 'APPROVED']).nullable(), pinnedVersionId: z.string().uuid().optional() })
   .strict();
 
+// ---- Phase 17: enterprise / government / sovereign ----
+
+export const identityProviderSchema = z
+  .object({
+    type: z.enum(['OIDC', 'SAML']),
+    displayName: z.string().trim().min(2).max(120),
+    enabled: z.boolean().optional(),
+    issuer: z.string().trim().max(400).optional(),
+    clientIdRef: z.string().trim().max(96).optional(),
+    clientSecretRef: z.string().trim().max(96).optional(),
+    metadataRef: z.string().trim().max(96).optional(),
+    spEntityId: z.string().trim().max(400).optional(),
+    acsUrl: z.string().trim().max(400).optional(),
+    idpCertRef: z.string().trim().max(96).optional(),
+    enforceSSO: z.boolean().optional(),
+    allowPasswordFallback: z.boolean().optional(),
+    domainRestriction: z.array(z.string().trim().max(253)).max(20).optional(),
+    attributeMappings: z.record(z.string(), z.string()).optional(),
+  })
+  .strict();
+
+export const claimDomainSchema = z.object({ domain: z.string().trim().min(3).max(253) }).strict();
+
+export const securityPolicySchema = z
+  .object({
+    allowedAIProviders: z.array(z.string().trim().max(64)).max(50).optional(),
+    allowedModelProfiles: z.array(z.string().trim().max(64)).max(50).optional(),
+    externalAIAllowed: z.boolean().optional(),
+    webSearchMode: z.enum(['DISABLED', 'PUBLIC_ONLY', 'APPROVED_DOMAINS', 'STANDARD']).optional(),
+    approvedResearchDomains: z.array(z.string().trim().max(253)).max(100).optional(),
+    personalConnectorsAllowed: z.boolean().optional(),
+    organizationConnectorsRequired: z.boolean().optional(),
+    allowedConnectors: z.array(z.string().trim().max(48)).max(50).optional(),
+    agentsEnabled: z.boolean().optional(),
+    externalWritesEnabled: z.boolean().optional(),
+    standingAuthorizationsAllowed: z.boolean().optional(),
+    maxAgentSteps: z.number().int().min(1).max(50).nullable().optional(),
+    scheduledAutomationsEnabled: z.boolean().optional(),
+    scheduledWritesEnabled: z.boolean().optional(),
+    memoryEnabled: z.boolean().optional(),
+    multimodalEnabled: z.boolean().optional(),
+    researchEnabled: z.boolean().optional(),
+    researchExternalWebAllowed: z.boolean().optional(),
+    marketplaceMode: z.enum(['PUBLIC_ALLOWED', 'CURATED_ONLY', 'ORGANIZATION_ONLY', 'DISABLED']).optional(),
+    dataExportAllowed: z.boolean().optional(),
+    mfaRequired: z.boolean().optional(),
+    ipAllowlist: z.array(z.string().trim().max(64)).max(100).optional(),
+    // Sensitive changes may require an explicit confirmation (route-enforced).
+    confirm: z.boolean().optional(),
+  })
+  .strict();
+
+export const residencyPolicySchema = z
+  .object({
+    name: z.string().trim().max(120).optional(),
+    allowedRegions: z.array(z.enum(['UAE', 'EU', 'US', 'OTHER'])).max(4).optional(),
+    requiredRegions: z.array(z.enum(['UAE', 'EU', 'US', 'OTHER'])).max(4).optional(),
+    storageRegion: z.enum(['UAE', 'EU', 'US', 'OTHER']).nullable().optional(),
+    vectorRegion: z.enum(['UAE', 'EU', 'US', 'OTHER']).nullable().optional(),
+    modelInferenceRegion: z.enum(['UAE', 'EU', 'US', 'OTHER']).nullable().optional(),
+    externalTransferAllowed: z.boolean().optional(),
+  })
+  .strict();
+
+export const retentionPolicySchema = z
+  .object({
+    name: z.string().trim().max(120).optional(),
+    conversationRetentionDays: z.number().int().min(1).max(3650).nullable().optional(),
+    fileRetentionDays: z.number().int().min(1).max(3650).nullable().optional(),
+    auditRetentionDays: z.number().int().min(30).max(3650).nullable().optional(),
+    memoryRetentionDays: z.number().int().min(1).max(3650).nullable().optional(),
+    researchRetentionDays: z.number().int().min(1).max(3650).nullable().optional(),
+    workflowRunRetentionDays: z.number().int().min(1).max(3650).nullable().optional(),
+    deletionMode: z.enum(['SOFT_DELETE', 'HARD_DELETE']).optional(),
+    legalHoldEnabled: z.boolean().optional(),
+  })
+  .strict();
+
+export const roleDefinitionSchema = z
+  .object({ name: z.string().trim().min(2).max(120), description: z.string().trim().max(400).optional(), permissions: z.array(z.string().trim().max(48)).max(30) })
+  .strict();
+
+export const assignRoleSchema = z.object({ userId: z.string().uuid(), roleDefinitionId: z.string().uuid().nullable() }).strict();
+
+export const privateProviderSchema = z
+  .object({
+    slug: z.string().trim().min(2).max(64).regex(/^[a-z0-9-]+$/),
+    displayName: z.string().trim().min(2).max(120),
+    type: z.enum(['openai-compatible', 'ollama', 'mock']),
+    region: z.enum(['UAE', 'EU', 'US', 'OTHER']),
+    baseUrlEnvRef: z.string().trim().max(96).optional(),
+    apiKeyEnvRef: z.string().trim().max(96).optional(),
+  })
+  .strict();
+
+export const deploymentProfileSchema = z
+  .object({
+    slug: z.string().trim().min(2).max(64).regex(/^[a-z0-9-]+$/),
+    displayName: z.string().trim().min(2).max(120),
+    deploymentType: z.enum(['SHARED_SAAS', 'DEDICATED_TENANT', 'PRIVATE_CLOUD', 'SOVEREIGN', 'ON_PREMISE_READY']),
+    region: z.enum(['UAE', 'EU', 'US', 'OTHER']).optional(),
+    jurisdictionLabel: z.string().trim().max(120).optional(),
+    tenantIsolationMode: z.enum(['SHARED_DATABASE_TENANT_ISOLATION', 'DEDICATED_DATABASE']).optional(),
+    allowedProviderRegions: z.array(z.enum(['UAE', 'EU', 'US', 'OTHER'])).max(4).optional(),
+    externalAIAllowed: z.boolean().optional(),
+    externalWebSearchAllowed: z.boolean().optional(),
+    externalConnectorsAllowed: z.boolean().optional(),
+    privateStorageRequired: z.boolean().optional(),
+    privateVectorStoreRequired: z.boolean().optional(),
+    privileged: z.boolean().optional(),
+  })
+  .strict();
+
+export const assignDeploymentSchema = z.object({ organizationId: z.string().uuid(), profileId: z.string().uuid().nullable() }).strict();
+
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type ChatRequestInput = z.infer<typeof chatRequestSchema>;

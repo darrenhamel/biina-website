@@ -839,6 +839,75 @@ Details: [`PERSONAS.md`](./PERSONAS.md) · [`EXPERIENCE_PROFILES.md`](./EXPERIEN
 [`LIBRARY_SECURITY.md`](./LIBRARY_SECURITY.md) · [`KIDS_TEENS_EXPERIENCE.md`](./KIDS_TEENS_EXPERIENCE.md) ·
 [`ORGANIZATION_LIBRARY.md`](./ORGANIZATION_LIBRARY.md).
 
+## 4n. Enterprise / Government / Sovereign deployment control layer (Phase 17)
+
+Adds the **governance layer** that lets the *same* product run as shared SaaS, a dedicated
+tenant, a private cloud, or a sovereign/on-premise deployment — **via configuration and
+policy, not forks**. It is not a separate product: it folds on top of the existing routing,
+policy, org, connector, agent, research, memory, and audit systems and only ever
+**tightens**. Code: `apps/web/src/server/enterprise/`; routing in
+`apps/web/src/server/ai/routing.ts`; schema Phase 17 section; migration
+[`0015_enterprise.sql`](../apps/web/drizzle/0015_enterprise.sql).
+
+```
+User → Deployment profile → Org security/residency/retention policy
+     → identity · models · storage · vector · memory · connectors · search · audit
+       → approved infrastructure   (each step only NARROWS)
+```
+
+- **Governance fold (platform → deployment → org, most-restrictive).** `resolveOrgGovernance`
+  is the single entry point → `{ deploymentProfile, policy, residency }`, folded by
+  `combineSecurityPolicy`: booleans AND, enums pick the more restrictive, allowlists narrow
+  (intersection), ceilings take the min. Nothing downstream can loosen an upstream rule.
+  `SOVEREIGN_MODE_ENABLED` flips the platform baseline so external AI / web / connectors
+  default OFF unless a deployment profile re-allows them. Deployment profiles are
+  PLATFORM-managed; a **privileged** (sovereign/private-cloud/dedicated) profile is assigned
+  by a platform admin, never self-assigned.
+- **Residency routing reuses the existing router — no separate engine.** `routeConstraintsFor`
+  feeds the resolved residency + external-AI flag + allowlists into the Phase 4 `RouteContext`;
+  `satisfiesEnterprisePolicy` enforces region residency + external-provider block +
+  **private-provider tenant isolation** (an ORGANIZATION provider is usable only by its owner
+  org) + provider/model allowlists. `selectRoute` throws `NO_COMPLIANT_MODEL_AVAILABLE` when
+  candidates exist but none comply, and `selectFallback` never rescues via a prohibited
+  provider — the system fails **closed**. Regions (`UAE|EU|US|OTHER`) are **config, not a
+  compliance claim**.
+- **Private providers extend the gateway, not the frontend.** A private/dedicated provider
+  (`ownerType=ORGANIZATION`, `isExternal=false`, env-ref secrets) is a registry entry; the UI
+  still talks only to `POST /api/ai/chat` and never learns the provider. Logical model ids
+  (`biina`, `biina-gov`, …) never expose vendor names.
+- **Enterprise identity / SCIM / RBAC — provider-independent, reusing auth.** OIDC/SAML use an
+  **injectable verifier** (structural default validates issuer/audience/expiry/nonce + org
+  binding; a real openid-client/SAML library registers at activation); `authenticateSso` JIT-
+  provisions a membership bound to that org only and issues the session via the normal
+  `createSession`. SCIM (org-scoped hashed token, `/api/scim/v2`) and DNS-TXT domain
+  verification automate/prove membership. RBAC adds a validated `<domain>.<action>` vocabulary
+  + built-in/custom roles with separation of duties and no self-escalation, gated by
+  `requireOrgPermission`.
+- **Reuses the existing policy / audit / retention systems.** The org security policy is
+  versioned + snapshotted with high-risk-change confirmation; audit is the existing append-only
+  `security_events` log, org-scoped, `audit.read`-gated, with redacted CSV/JSON export;
+  retention folds with platform minimums (audit ≥ 30d) and the expiration job reuses the
+  scheduler. Flags: `ENTERPRISE_FEATURES_ENABLED` (true), `SAML_ENABLED` (false),
+  `SCIM_ENABLED` (false), `DEDICATED_PROVIDER_SUPPORT_ENABLED` (true), `SOVEREIGN_MODE_ENABLED`
+  (false).
+- **Honest readiness.** SSO/SAML/SCIM crypto integrate at activation; sovereign/UAE deployment
+  **requires infrastructure + security/compliance review**; retention jobs, legal hold, break-
+  glass, service accounts, MFA/passkey/IP-allowlist, dedicated-DB, K8s/IaC are readiness. **No
+  certification is claimed, and selecting a Government persona does not create sovereignty.**
+
+Details: [`ENTERPRISE_ARCHITECTURE.md`](./ENTERPRISE_ARCHITECTURE.md) ·
+[`ENTERPRISE_IDENTITY.md`](./ENTERPRISE_IDENTITY.md) · [`OIDC.md`](./OIDC.md) ·
+[`SAML.md`](./SAML.md) · [`SCIM.md`](./SCIM.md) ·
+[`DOMAIN_VERIFICATION.md`](./DOMAIN_VERIFICATION.md) ·
+[`ENTERPRISE_RBAC.md`](./ENTERPRISE_RBAC.md) · [`DATA_RESIDENCY.md`](./DATA_RESIDENCY.md) ·
+[`PRIVATE_MODELS.md`](./PRIVATE_MODELS.md) · [`RETENTION.md`](./RETENTION.md) ·
+[`ENTERPRISE_AUDIT.md`](./ENTERPRISE_AUDIT.md) ·
+[`SOVEREIGN_DEPLOYMENT.md`](./SOVEREIGN_DEPLOYMENT.md) ·
+[`PRIVATE_DEPLOYMENT.md`](./PRIVATE_DEPLOYMENT.md) ·
+[`UAE_DEPLOYMENT_READINESS.md`](./UAE_DEPLOYMENT_READINESS.md) ·
+[`UAE_DEPLOYMENT_ACTIVATION_CHECKLIST.md`](./UAE_DEPLOYMENT_ACTIVATION_CHECKLIST.md) ·
+[`ENTERPRISE_ONBOARDING_CHECKLIST.md`](./ENTERPRISE_ONBOARDING_CHECKLIST.md).
+
 ### System prompt (server-side, layered)
 
 Assembled entirely on the server (`apps/web/src/server/ai/system-prompt.ts`),

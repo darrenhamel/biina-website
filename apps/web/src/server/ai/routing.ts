@@ -38,11 +38,28 @@ export interface RouteContext {
   /** Extra required capabilities on top of the workload's. */
   requiredCapabilities?: Capability[];
   // Organization context — only ever set AFTER server-side membership verification.
-  // Readiness for org-plan / org-type routing rules (not yet enforced).
   organizationId?: string | null;
   organizationRole?: string | null;
   organizationPlan?: string | null;
+  // Phase 17 — enterprise data-residency + provider policy. All constraints only
+  // ever NARROW the candidate set; a route that violates them is never selected and
+  // there is NO silent fallback to a prohibited provider.
+  residency?: EnterpriseResidency | null;
+  /** When false, providers marked isExternal are not eligible. */
+  externalAIAllowed?: boolean;
+  /** Organization allowlists (empty = no additional restriction). */
+  allowedProviderSlugs?: string[];
+  allowedModelSlugs?: string[];
 }
+
+/** Region constraints passed to the router (resolved by enterprise/residency.ts). */
+export interface EnterpriseResidency {
+  requiredRegions: string[];
+  allowedRegions: string[];
+}
+
+/** Thrown when candidates exist but none satisfy the trusted residency/provider policy. */
+export const NO_COMPLIANT_MODEL_AVAILABLE = 'NO_COMPLIANT_MODEL_AVAILABLE';
 
 export interface RouteDecision {
   model: AiModel;
@@ -80,6 +97,42 @@ export function isModelUsable(
     if (!model.visibleToUsers && !opts.isAdmin) return false;
   }
   return true;
+}
+
+/**
+ * Enterprise policy gate: region residency, external-provider block, private-provider
+ * tenant isolation, and org provider/model allowlists. Returns true only if the
+ * (model, provider) pair is permitted for THIS context. Empty/absent constraints
+ * never restrict — so consumer routing is unaffected.
+ */
+export function satisfiesEnterprisePolicy(model: AiModel | undefined, provider: AiProvider | undefined, ctx: RouteContext): boolean {
+  if (!model || !provider) return false;
+  // Private provider isolation: an ORGANIZATION-owned provider is usable ONLY by its
+  // owning organization. Another tenant (or a personal request) can never select it.
+  if (provider.ownerType === 'ORGANIZATION') {
+    if (!ctx.organizationId || provider.ownerOrganizationId !== ctx.organizationId) return false;
+  }
+  // External-provider block (org disabled external AI / sovereign deployment).
+  if (ctx.externalAIAllowed === false && provider.isExternal) return false;
+  // Region residency.
+  if (ctx.residency) {
+    const region = provider.region ?? null;
+    if (ctx.residency.requiredRegions.length && (!region || !ctx.residency.requiredRegions.includes(region))) return false;
+    if (ctx.residency.allowedRegions.length && (!region || !ctx.residency.allowedRegions.includes(region))) return false;
+  }
+  // Org allowlists (empty = no restriction).
+  if (ctx.allowedProviderSlugs && ctx.allowedProviderSlugs.length && !ctx.allowedProviderSlugs.includes(provider.slug)) return false;
+  if (ctx.allowedModelSlugs && ctx.allowedModelSlugs.length && !ctx.allowedModelSlugs.includes(model.slug)) return false;
+  return true;
+}
+
+function hasEnterpriseConstraints(ctx: RouteContext): boolean {
+  return Boolean(
+    (ctx.residency && (ctx.residency.requiredRegions.length || ctx.residency.allowedRegions.length)) ||
+      ctx.externalAIAllowed === false ||
+      (ctx.allowedProviderSlugs && ctx.allowedProviderSlugs.length) ||
+      (ctx.allowedModelSlugs && ctx.allowedModelSlugs.length),
+  );
 }
 
 function toDecision(
@@ -137,16 +190,30 @@ export function selectRoute(ctx: RouteContext, snap: AiConfigSnapshot): RouteDec
     if (!isModelUsable(override.model, p, caps, { isAdmin: ctx.isAdmin, forOverride: true })) {
       throw new GatewayError('invalid_config', 'Requested model is not available');
     }
+    // An explicit override must ALSO satisfy enterprise policy — never a bypass.
+    if (!satisfiesEnterprisePolicy(override.model, p, ctx)) {
+      throw new GatewayError('invalid_config', NO_COMPLIANT_MODEL_AVAILABLE);
+    }
     return toDecision(snap, override.model!, override.reason);
   }
 
+  let sawUsableButNonCompliant = false;
   for (const c of cands) {
     const p = providerById(snap, c.model?.providerId);
-    if (isModelUsable(c.model, p, caps)) {
-      return toDecision(snap, c.model!, c.reason);
+    if (!isModelUsable(c.model, p, caps)) continue;
+    // A usable model that violates trusted enterprise policy is skipped — and we
+    // remember it so we can return NO_COMPLIANT_MODEL_AVAILABLE rather than a generic
+    // error (and, critically, never fall back to a prohibited provider).
+    if (!satisfiesEnterprisePolicy(c.model, p, ctx)) {
+      sawUsableButNonCompliant = true;
+      continue;
     }
+    return toDecision(snap, c.model!, c.reason);
   }
 
+  if (sawUsableButNonCompliant || hasEnterpriseConstraints(ctx)) {
+    throw new GatewayError('invalid_config', NO_COMPLIANT_MODEL_AVAILABLE);
+  }
   throw new GatewayError('invalid_config', 'No usable model for this request');
 }
 
@@ -168,6 +235,9 @@ export function selectFallback(
   if (!provider || provider.id === primary.provider.id) return null; // avoid same-provider loop
   const caps = requiredCaps(ctx);
   if (!isModelUsable(model, provider, caps)) return null;
+  // A fallback must ALSO satisfy residency/provider policy — a compliance failure
+  // must NOT be silently rescued by falling back to a prohibited external provider.
+  if (!satisfiesEnterprisePolicy(model, provider, ctx)) return null;
   return toDecision(snap, model, `fallback:${primary.reason}`, true);
 }
 
