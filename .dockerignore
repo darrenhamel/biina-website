@@ -1,0 +1,23 @@
+# Keep the build context (and image) free of dev cruft, secrets, and test data.
+node_modules
+**/node_modules
+.next
+**/.next
+dist
+**/dist
+.git
+.github
+.env
+.env.*
+!.env.example
+*.log
+coverage
+**/coverage
+.data
+**/.data
+scratchpad
+docs
+*.md
+!README.md
+.vscode
+.idea

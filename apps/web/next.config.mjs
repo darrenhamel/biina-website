@@ -1,6 +1,16 @@
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+const monorepoRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // Standalone output produces a minimal, self-contained server bundle for the
+  // production Docker image (no dev deps, only traced runtime files). The tracing
+  // root is the monorepo root so workspace packages are included.
+  output: 'standalone',
+  outputFileTracingRoot: monorepoRoot,
   // The AI gateway is a workspace TypeScript package consumed as source.
   transpilePackages: ['@biina/ai-gateway'],
   eslint: {

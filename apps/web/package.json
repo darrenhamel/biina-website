@@ -15,7 +15,8 @@
     "db:push": "drizzle-kit push",
     "db:seed": "tsx scripts/seed.ts",
     "db:seed:production": "tsx scripts/seed-production.ts",
-    "bootstrap:admin": "tsx scripts/bootstrap-admin.ts"
+    "bootstrap:admin": "tsx scripts/bootstrap-admin.ts",
+    "validate:production": "tsx scripts/validate-production.ts"
   },
   "dependencies": {
     "@biina/ai-gateway": "*",
