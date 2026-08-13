@@ -5,6 +5,7 @@ import type { OrganizationIdentityProvider } from '@/server/db/schema';
 import { AppError } from '@/lib/errors';
 import { logSecurityEvent } from '@/server/auth/events';
 import { samlEnabled } from './config';
+import { isProduction, devFeaturesAllowed } from '@/server/config/production';
 
 /**
  * Provider-independent enterprise identity (OIDC / SAML). BIINA never trusts an
@@ -50,6 +51,14 @@ export interface AssertionVerifier {
  */
 const structuralVerifier: AssertionVerifier = {
   async verify(idp, input) {
+    // PRODUCTION FAIL-CLOSED (Phase 18): the structural verifier does NOT check a
+    // cryptographic signature. It is only safe for tests/offline demos. In production a
+    // real verifier (openid-client / a SAML library) MUST be registered via
+    // setAssertionVerifier(); if none is, we refuse rather than accept a forged (but
+    // structurally valid) assertion.
+    if (isProduction() && !devFeaturesAllowed()) {
+      throw new AppError(500, 'No cryptographic SSO verifier is configured for production.', 'sso_no_verifier');
+    }
     const a = input.raw as Partial<VerifiedIdentity> & { signatureValid?: boolean };
     if (!a || typeof a !== 'object') throw new AppError(401, 'Malformed assertion.', 'sso_malformed');
     if (!a.subject || !a.email || !a.issuer) throw new AppError(401, 'Assertion missing required claims.', 'sso_incomplete');

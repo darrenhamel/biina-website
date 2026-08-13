@@ -38,6 +38,13 @@ async function main() {
     console.error('DATABASE_URL is not set.');
     process.exit(1);
   }
+  // PRODUCTION GUARD (Phase 18): the DEV seed creates a default-password admin, a mock
+  // AI provider, and test billing data — none of which may exist in production. Refuse
+  // to run against a production environment; use scripts/seed-production.ts instead.
+  if ((process.env.NODE_ENV === 'production' || process.env.BIINA_ENV === 'production') && process.env.ALLOW_DEV_SEED_IN_PROD !== 'true') {
+    console.error('Refusing to run the development seed in production. Use `npm run db:seed:production` + `npm run bootstrap:admin`.');
+    process.exit(1);
+  }
   const sql = postgres(url, { max: 1 });
   const db = drizzle(sql);
 

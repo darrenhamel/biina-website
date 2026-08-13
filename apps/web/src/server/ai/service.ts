@@ -2,11 +2,13 @@ import { randomUUID } from 'node:crypto';
 import {
   streamChatRoute,
   toGatewayError,
+  GatewayError,
   type ChatMessage,
   type ChatChunk,
   type UsageMeta,
 } from '@biina/ai-gateway';
 import { logger } from '@/lib/logger';
+import { isProduction, devFeaturesAllowed } from '@/server/config/production';
 import { withSystemPrompt, type SystemPromptContext } from './system-prompt';
 import { recordRequest, recordResult } from './metrics';
 import { loadAiConfig, modelBySlug } from './catalog';
@@ -124,6 +126,12 @@ export function startAssistantReply(params: StartReplyParams): AssistantStream {
     let decision: RouteDecision;
     try {
       decision = selectRoute(params.routeContext, snap);
+      // PRODUCTION GUARD (Phase 18): the mock provider returns canned output and must
+      // never serve real users. If production somehow routes to it, fail loudly rather
+      // than silently answering with fake content.
+      if (decision.providerType === 'mock' && isProduction() && !devFeaturesAllowed()) {
+        throw new GatewayError('invalid_config', 'The mock AI provider cannot serve production traffic.');
+      }
     } catch (err) {
       const ge = toGatewayError(err, 'routing');
       lastErrorCode = ge.code;

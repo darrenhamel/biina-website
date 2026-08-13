@@ -557,6 +557,44 @@ allowlist, dedicated-database isolation, and K8s / IaC packaging. See
 [`docs/UAE_DEPLOYMENT_ACTIVATION_CHECKLIST.md`](./docs/UAE_DEPLOYMENT_ACTIVATION_CHECKLIST.md),
 and [`docs/ENTERPRISE_ONBOARDING_CHECKLIST.md`](./docs/ENTERPRISE_ONBOARDING_CHECKLIST.md).
 
+## Production readiness (Phase 18)
+
+BIINA.ai **builds, passes ~290 tests, and runs locally** end to end (Postgres 16,
+migrations `0000`–`0015`, production build green). Phase 18 adds the **launch and
+infrastructure readiness layer**: a fail-safe startup config validator
+(`apps/web/src/server/config/production.ts` — refuses to start on missing/weak/dev-looking
+critical config), security headers + CSP in middleware, production-safe seed + admin
+bootstrap scripts (no hard-coded creds), and a full set of launch docs.
+
+**Implemented (in code):** the whole product surface across Phases 1–17, kill switches
+(agent writes, research, library/marketplace, enterprise SAML/SCIM/sovereign) + DB-backed AI
+maintenance mode, config validation, CSP/security headers, and rebuildable portable
+defaults (LocalFileStorage, PortableVectorStore jsonb+cosine — both rebuildable from source).
+
+**REQUIRES HUMAN ACTION before launch (no production infrastructure is provisioned yet):**
+
+- **Production infrastructure** — application + worker hosting, managed Postgres, object
+  storage (S3/R2 — do **not** ship LocalFileStorage), a real AI + embedding endpoint (the
+  `mock` provider is dev-only and refused in production), and a secrets manager.
+- **DNS / TLS / CDN / WAF** — none configured.
+- **Live billing** — Stripe is in **TEST mode**; live is not activated.
+- **Backups tested** — automated backups + at least one **verified restore** (none tested).
+- **External security review / penetration test** — not yet performed.
+- **Legal documents** — ToS, Privacy Policy, AUP, Subscription/Refund, Cookie policy —
+  **require legal review** (not drafted here).
+
+**Honest posture:** no certification, compliance, or sovereignty is claimed; region tags are
+configuration, not proof. The **recommended launch tier is a controlled, invite-only beta —
+not general availability.**
+
+Start here: [`docs/LAUNCH_CHECKLIST.md`](./docs/LAUNCH_CHECKLIST.md), with
+[`docs/PRODUCTION_INFRASTRUCTURE_CHECKLIST.md`](./docs/PRODUCTION_INFRASTRUCTURE_CHECKLIST.md),
+[`docs/INFRASTRUCTURE_COST_MODEL.md`](./docs/INFRASTRUCTURE_COST_MODEL.md),
+[`docs/FEATURE_FLAGS.md`](./docs/FEATURE_FLAGS.md),
+[`docs/LAUNCH_DAY_RUNBOOK.md`](./docs/LAUNCH_DAY_RUNBOOK.md),
+[`docs/POST_LAUNCH_PLAN.md`](./docs/POST_LAUNCH_PLAN.md), and
+[`docs/UAE_DEPLOYMENT_REVIEW.md`](./docs/UAE_DEPLOYMENT_REVIEW.md).
+
 **Deferred:** **real external write actions** (the agent ships write-capable but on
 the mock adapter; real Gmail/Calendar/Slack writes require manual activation),
 **scheduled external writes** (off by default; need a standing authorization **and**
