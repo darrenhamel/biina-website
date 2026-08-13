@@ -1,0 +1,115 @@
+# BIINA.ai — PRODUCTION / STAGING compose for a single small VPS (Hetzner).
+#
+# This is the invite-only beta topology: deliberately small. NO Kubernetes, NO
+# service mesh, NO in-cluster database. The managed services live OFF this box:
+#   • PostgreSQL + pgvector  → Supabase (managed)
+#   • Object storage (S3)    → Supabase Storage (managed, private bucket)
+#   • Inference + embeddings → RunPod / OpenAI-compatible endpoint (managed)
+#   • Email                  → Resend (managed)
+#   • TLS + DNS + WAF        → Cloudflare (in front of this box)
+#
+# What runs HERE:
+#   • web        — the Next.js standalone server (app.biina.ai)
+#   • scheduler  — a tiny sidecar that POSTs the workflow tick once a minute
+#   • proxy      — an optional local TLS/edge terminator (Caddy) in front of web
+#
+# Secrets come from an env file passed at run time (NEVER committed):
+#   docker compose --env-file .env.production -f docker-compose.production.yml up -d
+# See .env.production.example for the full variable list and docs/HETZNER_DEPLOYMENT.md.
+
+name: biina-prod
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: biina-web:${IMAGE_TAG:-latest}
+    container_name: biina-web
+    restart: unless-stopped
+    # All configuration/secrets arrive via the env file — nothing is baked into the image.
+    env_file:
+      - ${ENV_FILE:-.env.production}
+    environment:
+      NODE_ENV: production
+      PORT: '3000'
+    expose:
+      - '3000'
+    # Only bind to the loopback interface; the proxy (or Cloudflare tunnel) fronts it.
+    ports:
+      - '127.0.0.1:3000:3000'
+    healthcheck:
+      # The app exposes a lightweight liveness/readiness endpoint.
+      test: ['CMD-SHELL', 'node -e "fetch(\"http://127.0.0.1:3000/api/health\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"']
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '5'
+
+  # The scheduler "worker". The DB is the authoritative queue; this sidecar simply
+  # advances it by calling the internal tick endpoint on a fixed cadence with the shared
+  # secret. It holds NO application logic and NO database credentials — only the tick
+  # secret and the internal URL. If it dies, no data is lost; ticks just pause.
+  scheduler:
+    image: curlimages/curl:8.11.0
+    container_name: biina-scheduler
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      # Shared secret for the tick endpoint (compared in constant time by the app).
+      WORKFLOW_TICK_SECRET: ${WORKFLOW_TICK_SECRET:?set WORKFLOW_TICK_SECRET in the env file}
+      TICK_INTERVAL_SECONDS: ${TICK_INTERVAL_SECONDS:-60}
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        echo "scheduler: ticking every ${TICK_INTERVAL_SECONDS:-60}s"
+        while true; do
+          curl -fsS -m 30 -X POST \
+            -H "x-workflow-tick-secret: $${WORKFLOW_TICK_SECRET}" \
+            -H "x-worker-id: compose-scheduler" \
+            http://web:3000/api/internal/workflows/tick >/dev/null 2>&1 \
+            || echo "scheduler: tick failed at $$(date -u +%FT%TZ)"
+          sleep "$${TICK_INTERVAL_SECONDS:-60}"
+        done
+    security_opt:
+      - no-new-privileges:true
+    logging:
+      driver: json-file
+      options:
+        max-size: '5m'
+        max-file: '3'
+
+  # Optional local TLS terminator. If Cloudflare fronts the box directly (recommended
+  # for the beta), you can disable this profile and let Cloudflare terminate TLS. Enable
+  # with:  docker compose --profile proxy ... up -d
+  proxy:
+    image: caddy:2.8-alpine
+    container_name: biina-proxy
+    restart: unless-stopped
+    profiles: ['proxy']
+    depends_on:
+      web:
+        condition: service_healthy
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  caddy_data:
+  caddy_config:

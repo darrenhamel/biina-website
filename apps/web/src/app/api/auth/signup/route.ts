@@ -7,6 +7,7 @@ import { createSession, requestMeta } from '@/server/auth/session';
 import { logSecurityEvent } from '@/server/auth/events';
 import { createEmailToken } from '@/server/auth/tokens';
 import { getEmailService, emailTemplates, devLinksEnabled } from '@/server/email';
+import { isSignupAllowed } from '@/server/auth/signup-policy';
 import { signupSchema } from '@/lib/validation';
 import { rateLimit, RL } from '@/server/lib/rate-limit';
 import { appBaseUrl } from '@/lib/url';
@@ -24,6 +25,18 @@ export async function POST(req: NextRequest) {
     }
 
     const { displayName, email, password } = signupSchema.parse(await req.json());
+
+    // Invite-only beta gate (server-enforced). In `invite_only` mode an account is
+    // created only for allowlisted emails; the message is intentionally non-committal
+    // and identical whether or not the email is known, so it can't be used to probe.
+    if (!isSignupAllowed(email)) {
+      await logSecurityEvent({ event: 'account.signup_blocked', ip: meta.ip, userAgent: meta.userAgent, metadata: { reason: 'not_on_invite_allowlist' } });
+      return NextResponse.json(
+        { error: 'BIINA is currently invite-only. Ask your administrator for an invitation.' },
+        { status: 403 },
+      );
+    }
+
     const db = getDb();
 
     const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1);

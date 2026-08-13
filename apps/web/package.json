@@ -16,7 +16,10 @@
     "db:seed": "tsx scripts/seed.ts",
     "db:seed:production": "tsx scripts/seed-production.ts",
     "bootstrap:admin": "tsx scripts/bootstrap-admin.ts",
-    "validate:production": "tsx scripts/validate-production.ts"
+    "validate:production": "tsx scripts/validate-production.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "smoke:staging": "tsx scripts/smoke.ts",
+    "smoke:production": "tsx scripts/smoke.ts"
   },
   "dependencies": {
     "@biina/ai-gateway": "*",

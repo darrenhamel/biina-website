@@ -33,8 +33,21 @@ if (provider === 'openai-compatible' && !present('OPENAI_COMPATIBLE_BASE_URL') &
 
 // 3) Storage — durable object storage for Files/RAG.
 const storage = env.FILE_STORAGE_PROVIDER ?? 'local';
-if (storage === 'local') add(isProduction() ? 'BLOCKER' : 'WARNING', 'FILE_STORAGE_PROVIDER', 'local storage is not durable — configure s3/r2 before enabling Files/RAG');
-else add('OK', 'FILE_STORAGE_PROVIDER', `storage=${storage}`);
+if (storage === 'local') add(isProduction() ? 'BLOCKER' : 'WARNING', 'FILE_STORAGE_PROVIDER', 'local storage is not durable — configure s3/supabase before enabling Files/RAG');
+else if (['s3', 'r2', 'supabase'].includes(storage)) {
+  const ok = present('S3_ENDPOINT') && present('S3_BUCKET') && present('S3_ACCESS_KEY_ID') && present('S3_SECRET_ACCESS_KEY');
+  if (!ok) add('BLOCKER', 'FILE_STORAGE_PROVIDER', `${storage} selected but S3_ENDPOINT/S3_BUCKET/S3_ACCESS_KEY_ID/S3_SECRET_ACCESS_KEY are incomplete`);
+  else add('OK', 'FILE_STORAGE_PROVIDER', `storage=${storage} (S3-compatible configured)`);
+} else add('OK', 'FILE_STORAGE_PROVIDER', `storage=${storage}`);
+
+// 3b) Vector store + embeddings (RAG). pgvector recommended for production; the
+// deterministic embedder is a DEV fallback and must not serve real retrieval.
+const vector = env.VECTOR_STORE ?? 'portable';
+if (isProduction() && vector === 'portable') add('WARNING', 'VECTOR_STORE', 'portable jsonb store — configure pgvector for production RAG scale');
+else add('OK', 'VECTOR_STORE', `vector=${vector}`);
+const embed = env.EMBEDDING_PROVIDER ?? 'deterministic';
+if (embed === 'deterministic') add(isProduction() ? 'BLOCKER' : 'WARNING', 'EMBEDDING_PROVIDER', 'deterministic embedder is dev-only — configure a real embeddings provider (openai-compatible/ollama) for RAG');
+else add('OK', 'EMBEDDING_PROVIDER', `embeddings=${embed}`);
 
 // 4) Worker + scheduler — the workflow tick requires an external caller + shared secret.
 if (truthy(env.WORKFLOW_SCHEDULER_ENABLED ?? 'true')) {
@@ -43,8 +56,21 @@ if (truthy(env.WORKFLOW_SCHEDULER_ENABLED ?? 'true')) {
 }
 
 // 5) Email — required for verification/reset/invites.
-if (!present('RESEND_API_KEY') && !present('SMTP_URL')) add('WARNING', 'Email', 'no production email provider — verification/reset/invite emails will not be delivered');
-else add('OK', 'Email', 'email provider configured');
+const emailProvider = (env.EMAIL_PROVIDER ?? 'dev').toLowerCase();
+if (emailProvider === 'resend') {
+  if (!present('RESEND_API_KEY') || !present('EMAIL_FROM')) add('BLOCKER', 'Email', 'EMAIL_PROVIDER=resend requires RESEND_API_KEY and EMAIL_FROM');
+  else add('OK', 'Email', 'resend configured (from set)');
+} else if (isProduction()) {
+  add('BLOCKER', 'Email', 'no production email provider — set EMAIL_PROVIDER=resend + RESEND_API_KEY + EMAIL_FROM (verification/reset/invites will not be delivered)');
+} else add('WARNING', 'Email', 'dev email provider (no real delivery)');
+
+// 5b) Invite-only beta gate — for a controlled beta, public signup must be CLOSED.
+const signup = (env.SIGNUP_MODE ?? 'open').toLowerCase();
+if (signup === 'invite_only') {
+  const allow = (env.SIGNUP_ALLOWLIST ?? '').trim();
+  if (!allow) add('WARNING', 'SIGNUP_MODE', 'invite_only but SIGNUP_ALLOWLIST is empty — signup fails closed (no one can register)');
+  else add('OK', 'SIGNUP_MODE', 'invite_only (allowlist set)');
+} else add(isProduction() ? 'WARNING' : 'OK', 'SIGNUP_MODE', `open — public self-signup is enabled (${signup})`);
 
 // 6) Billing — test vs live posture.
 if (truthy(env.BILLING_LIVE_MODE)) {

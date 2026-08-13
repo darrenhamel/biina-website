@@ -1,0 +1,32 @@
+# BIINA.ai — optional local edge terminator (Caddy) for the beta VPS.
+#
+# Use this ONLY if you terminate TLS on the box itself. For the invite-only beta we
+# recommend fronting the box with Cloudflare (TLS + WAF + DNS) and letting Cloudflare
+# talk to `web` over the origin; in that setup you can skip this proxy entirely.
+#
+# The domain is injected via the SITE_ADDRESS env var so nothing is hard-coded:
+#   SITE_ADDRESS=app.biina.ai docker compose --profile proxy ... up -d
+# Set SITE_ADDRESS=:80 for a plain-HTTP origin behind Cloudflare (Full/Strict via CF cert).
+
+{$SITE_ADDRESS:app.biina.ai} {
+	encode gzip zstd
+
+	# App upstream (the Next.js standalone server on the internal network).
+	reverse_proxy web:3000 {
+		health_uri /api/health
+		health_interval 30s
+		health_timeout 5s
+	}
+
+	# Baseline hardening headers (the app also sets its own CSP/HSTS in middleware).
+	header {
+		-Server
+		Referrer-Policy strict-origin-when-cross-origin
+		X-Content-Type-Options nosniff
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

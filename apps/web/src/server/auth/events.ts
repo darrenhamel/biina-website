@@ -8,6 +8,7 @@ import { securityEvents } from '@/server/db/schema';
  */
 export type SecurityEventType =
   | 'account.created'
+  | 'account.signup_blocked'
   | 'login.success'
   | 'login.failure'
   | 'logout'

@@ -1,12 +1,11 @@
 import { logger } from '@/lib/logger';
+import { isProduction, devFeaturesAllowed } from '@/server/config/production';
 
 /**
  * Provider-independent email service. Core identity logic depends only on this
- * interface, never on a commercial email vendor. Phase 6 ships a development
- * provider; SMTP/Resend/SES adapters can be added later without touching callers.
- *
- * Development safety: the dev provider logs a link ONLY outside production, so
- * verification/reset tokens are never exposed in production logs.
+ * interface, never on a commercial email vendor. The development provider logs a link
+ * ONLY outside production; the Resend adapter delivers real mail in production. The
+ * API key is server-side only and never logged. Production refuses the mock provider.
  */
 
 export interface OutgoingEmail {
@@ -36,18 +35,62 @@ class DevelopmentEmailProvider implements EmailProvider {
   }
 }
 
+/**
+ * Resend transactional email adapter. Uses the Resend REST API over fetch (no SDK
+ * dependency). RESEND_API_KEY is read server-side and never logged; EMAIL_FROM is the
+ * verified sender. Authentication/security emails are sent WITHOUT open/click tracking.
+ */
+class ResendEmailProvider implements EmailProvider {
+  readonly name = 'resend';
+  constructor(private apiKey: string, private from: string, private replyTo?: string) {}
+  async send(email: OutgoingEmail): Promise<void> {
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${this.apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        from: this.from,
+        to: [email.to],
+        subject: email.subject,
+        text: email.text,
+        ...(this.replyTo ? { reply_to: this.replyTo } : {}),
+        // Never track auth/security emails.
+        tags: [{ name: 'category', value: 'transactional' }],
+      }),
+    });
+    if (!res.ok) {
+      // Surface a safe error; never log the API key or the token-bearing URL.
+      const status = res.status;
+      logger.error('email.send_failed', { provider: this.name, to: redactEmail(email.to), subject: email.subject, status });
+      throw new Error(`Email delivery failed (${status}).`);
+    }
+    logger.info('email.send', { provider: this.name, to: redactEmail(email.to), subject: email.subject });
+  }
+}
+
 let provider: EmailProvider | null = null;
 
 export function getEmailService(): EmailProvider {
   if (provider) return provider;
-  const kind = process.env.EMAIL_PROVIDER || 'dev';
-  switch (kind) {
-    // Future: case 'smtp' / 'resend' / 'ses' → real adapters.
-    case 'dev':
-    default:
-      provider = new DevelopmentEmailProvider();
+  const kind = (process.env.EMAIL_PROVIDER || 'dev').toLowerCase();
+  if (kind === 'resend') {
+    const apiKey = process.env.RESEND_API_KEY;
+    const from = process.env.EMAIL_FROM;
+    if (!apiKey || !from) throw new Error('EMAIL_PROVIDER=resend requires RESEND_API_KEY and EMAIL_FROM.');
+    provider = new ResendEmailProvider(apiKey, from, process.env.EMAIL_REPLY_TO);
+    return provider;
   }
+  // PRODUCTION GUARD: the mock/dev provider does not deliver mail and must never serve
+  // production (verification/reset/invite would silently never arrive).
+  if (isProduction() && !devFeaturesAllowed()) {
+    throw new Error('No production email provider configured (set EMAIL_PROVIDER=resend + RESEND_API_KEY + EMAIL_FROM).');
+  }
+  provider = new DevelopmentEmailProvider();
   return provider;
+}
+
+/** For tests — reset the cached provider so env changes take effect. */
+export function _resetEmailService(): void {
+  provider = null;
 }
 
 /** True when we can safely surface an action link to the caller (dev testing). */
